@@ -205,6 +205,44 @@ that can be inspected by a domain expert.
 - See `CLAUDE.md` for attribution / authorship directives that apply to
   any AI-assisted work in this repository.
 
+## 12. Progress and to-do
+
+An initial implementation spike has been run end to end on real data to
+find blockers before committing to the full build. **No blockers were
+found** — the pipeline runs from NPWS boundaries through Sentinel-2
+access to a clipped, per-site area estimate. See
+`docs/blocker-check-log.md` for the checks and actual program output, and
+`docs/images/` for sample results.
+
+![Single-site detection](docs/images/demo_site.png)
+
+![Multi-site gallery](docs/images/gallery.png)
+
+### Done
+
+- [x] Reproducible geospatial environment (`requirements.txt`, no system GDAL)
+- [x] Load NPWS boundaries, reproject to ITM, filter West-of-Ireland bogs
+- [x] Programmatic Sentinel-2 access (STAC + windowed COG reads, no auth friction)
+- [x] NDVI-threshold baseline detector
+- [x] Polygon clip + area in hectares (cross-checked: 221.1 ha vs 221 ha NPWS record)
+- [x] Growing Neural Gas clustering on multi-spectral pixel vectors
+- [x] Visualisation (RGB / NDVI / detector overlays, single-site and gallery)
+
+### To do
+
+- [ ] Change detection between two epochs (2020 vs 2025) — the "cutting now" signal
+- [ ] Cloud masking via the Sentinel-2 SCL band
+- [ ] K-means baseline detector for comparison
+- [ ] Calibrate the bare-peat label rule across site sizes (a naive
+      lowest-NDVI cluster over-selects on large low-vigour bogs — combine
+      GNG clusters with a per-pixel NDVI criterion)
+- [ ] Validation: point-based accuracy assessment against high-resolution
+      imagery → precision / recall / confusion matrix
+- [ ] Separate legal / decommissioned works from illegal cutting
+- [ ] Batch run across all designated bog sites + summary table (CSV)
+- [ ] GeoJSON / shapefile export of detected polygons
+- [ ] Interactive web map
+
 ## Licence
 
 To be finalised before the first code commit (MIT or BSD 3-clause).
