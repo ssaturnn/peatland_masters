@@ -34,5 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
 OUT_DIR = REPO_ROOT / "outputs"
 
-# NPWS boundary shapefile (downloaded in the early POC; copied under data/).
+# NPWS boundary shapefiles (downloaded from npws.ie; kept under data/).
 NPWS_NHA_SHP = DATA_DIR / "NHA_ITM_2019_06.shp"
+NPWS_SAC_SHP = DATA_DIR / "sac" / "SAC_ITM_2026_01.shp"
+NPWS_SPA_SHP = DATA_DIR / "spa" / "SPA_ITM_2026_02.shp"

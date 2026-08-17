@@ -70,11 +70,13 @@ def _asset_href(item, band, provider):
     raise KeyError(f"band {band!r} not in assets: {list(item.assets)[:12]}")
 
 
-def read_window(item, band, bbox_wgs84, provider, out_shape=None):
+def read_window(item, band, bbox_wgs84, provider, out_shape=None,
+                resampling=rasterio.enums.Resampling.bilinear):
     """Read only the pixels covering bbox_wgs84 for one band.
 
     If out_shape is given, the window is resampled to that shape (used to
     bring 20 m bands onto the 10 m grid). Returns (array, transform, crs).
+    Categorical bands (e.g. SCL) should pass resampling=nearest.
     """
     href = _asset_href(item, config.S2_BANDS.get(band, band), provider)
     with rasterio.open(href) as src:
@@ -87,7 +89,7 @@ def read_window(item, band, bbox_wgs84, provider, out_shape=None):
             win_transform = src.window_transform(window)
         else:
             arr = src.read(1, window=window, out_shape=out_shape,
-                           resampling=rasterio.enums.Resampling.bilinear)
+                           resampling=resampling)
             # transform for the resampled grid over the same window bounds
             win_transform = rasterio.windows.transform(
                 window, src.transform
