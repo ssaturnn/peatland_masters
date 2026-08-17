@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Peatland turf-cutting monitor — West of Ireland</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside id="sidebar">
+    <header>
+      <h1>Peatland turf-cutting monitor</h1>
+      <p class="sub">Protected bogs · Galway · Mayo · Roscommon ·
+        Sentinel-2 <span id="coverage"></span></p>
+    </header>
+
+    <section class="controls">
+      <div class="ctl">
+        <label>Detector</label>
+        <div class="seg" id="method">
+          <button data-v="gng" class="on">GNG</button>
+          <button data-v="ndvi">NDVI</button>
+        </div>
+      </div>
+      <div class="ctl">
+        <label>Colour &amp; rank by</label>
+        <div class="seg" id="metric">
+          <button data-v="new" class="on">New cutting</button>
+          <button data-v="rate">Rate/yr</button>
+          <button data-v="pct">% bare</button>
+        </div>
+      </div>
+      <div class="ctl row">
+        <select id="filter-desig" title="Legal status">
+          <option value="">All statuses</option>
+          <option value="SAC">SAC only</option>
+          <option value="SPA">SPA only</option>
+          <option value="NHA-only">NHA only</option>
+        </select>
+        <select id="filter-county" title="County">
+          <option value="">All counties</option>
+          <option>Galway</option>
+          <option>Mayo</option>
+          <option>Roscommon</option>
+        </select>
+      </div>
+    </section>
+
+    <section id="ranking">
+      <h2>Ranking <span id="rank-label"></span></h2>
+      <ol id="rank-list"></ol>
+    </section>
+
+    <footer>
+      <div id="legend"></div>
+      <p class="disclaimer">Bare-peat areas are candidate detections from
+        unsupervised multi-spectral clustering (GNG) and an NDVI baseline;
+        confirming active cutting needs field / high-resolution validation.
+        MSc research prototype.</p>
+    </footer>
+  </aside>
+
+  <div id="map"></div>
+
+  <!-- expanding bog card -->
+  <div id="card-backdrop" class="hidden">
+    <article id="card" role="dialog" aria-modal="true">
+      <button id="card-close" aria-label="Close">✕</button>
+      <header class="card-hd">
+        <div class="card-hd-main">
+          <h2 id="card-name"></h2>
+          <p id="card-meta"></p>
+        </div>
+        <div id="card-badges"></div>
+      </header>
+
+      <div class="card-figure">
+        <div class="img-stack">
+          <img id="card-img-a" class="tile show" alt="Detected bare peat" />
+          <img id="card-img-b" class="tile" alt="" />
+        </div>
+        <div id="card-noimg" class="card-noimg hidden">No clear image this year</div>
+        <div class="card-legend">
+          <span><i class="sw sw-gng"></i>GNG</span>
+          <span><i class="sw sw-ndvi"></i>NDVI</span>
+        </div>
+        <div class="year-pill" id="year-pill"></div>
+      </div>
+
+      <div class="playbar">
+        <button id="play-btn" aria-label="Play years">▶</button>
+        <div class="slider-wrap">
+          <input type="range" id="year-range" min="0" max="3" value="3" step="1" />
+          <div id="year-ticks"></div>
+        </div>
+      </div>
+      <p id="card-year-read"></p>
+
+      <div id="card-spark"></div>
+      <div id="card-stats" class="stat-grid"></div>
+    </article>
+  </div>
+
+  <script src="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

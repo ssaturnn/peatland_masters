@@ -23,6 +23,9 @@ env/
 
 # Data (large / private / to be re-fetched)
 data/
+# ...but the web map's generated GeoJSON must ship with the site
+!web/data/
+!web/data/**
 *.tif
 *.tiff
 *.geotiff
