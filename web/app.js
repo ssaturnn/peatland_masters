@@ -18,12 +18,23 @@ const map = new maplibregl.Map({
   container: "map",
   style: {
     version: 8,
-    sources: { osm: {
-      type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      tileSize: 256, attribution: "© OpenStreetMap contributors",
-    } },
-    layers: [{ id: "osm", type: "raster", source: "osm" }],
+    sources: {
+      carto: {
+        type: "raster",
+        tiles: [
+          "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+          "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+          "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        ],
+        tileSize: 256,
+        attribution: "© OpenStreetMap contributors © CARTO",
+      },
+    },
+    layers: [
+      { id: "bg", type: "background", paint: { "background-color": "#0a1712" } },
+      { id: "carto", type: "raster", source: "carto",
+        paint: { "raster-opacity": 0.9, "raster-saturation": -0.2 } },
+    ],
   },
   center: [-8.9, 53.6], zoom: 7.4,
 });
@@ -211,6 +222,17 @@ function openCard(p) {
   const range = $("year-range");
   range.max = String(p.years.length - 1);
   $("year-ticks").innerHTML = p.years.map((y) => `<span>${y}</span>`).join("");
+
+  const vd = $("card-valid");
+  if (p.plots_2022 != null) {
+    vd.classList.remove("hidden");
+    vd.innerHTML = `<span class="vd-icon">✓</span>
+      <span><b>NPWS-documented hotspot.</b> ${p.plots_2022} turf plots were
+      officially recorded as cut here in 2022 — our detector independently
+      flags ${fmt(p.newly_gng_ha)} ha of new bare peat, without any labels.</span>`;
+  } else {
+    vd.classList.add("hidden"); vd.innerHTML = "";
+  }
   $("card-stats").innerHTML = statTiles(p);
 
   showYear(p.years.length - 1);
@@ -237,6 +259,44 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault(); togglePlay();
   }
 });
+
+/* ---- headline insight --------------------------------------------------- */
+function renderInsight() {
+  const withCut = FEATURES.filter((f) => f.properties.newly_gng_ha > 0.5);
+  const totalNew = FEATURES.reduce((s, f) => s + (f.properties.newly_gng_ha || 0), 0);
+  const top = [...FEATURES].sort((a, b) =>
+    b.properties.newly_gng_ha - a.properties.newly_gng_ha)[0];
+  const hs = FEATURES.filter((f) => f.properties.plots_2022 != null
+    && f.properties.newly_gng_ha > 0.5);
+
+  const valid = hs.length
+    ? `<div class="ins-valid">
+         <div class="ins-valid-hd">✓ Cross-checked against NPWS records</div>
+         <div class="ins-valid-body">The detector independently flags
+           ${hs.length} of the government-documented turf-cutting hotspots —
+           ${hs.slice(0, 3).map((f) => f.properties.name.replace(/ (Bog )?SAC.*/, ""))
+             .join(", ")} — where cutting was officially recorded.</div>
+       </div>`
+    : "";
+
+  document.getElementById("insight").innerHTML = `
+    <div class="ins-head">
+      <span class="ins-big">${fmt(totalNew, 0)}<span class="ins-unit">ha</span></span>
+      <span class="ins-cap">of new bare peat detected across
+        ${withCut.length} protected bogs, 2018 → 2024</span>
+    </div>
+    <div class="ins-row">
+      <div class="ins-cell"><b>${FEATURES.length}</b><span>bogs analysed</span></div>
+      <div class="ins-cell"><b>${withCut.length}</b><span>show new cutting</span></div>
+      <div class="ins-cell"><b>${top ? fmt(top.properties.newly_gng_ha, 0) : "–"}</b>
+        <span>ha worst site</span></div>
+    </div>
+    ${valid}
+    <div class="ins-ctx">Up to 90% of Irish peatlands are degraded; they hold
+      two-thirds of the nation's soil carbon. Ireland was referred to the EU
+      Court of Justice (2024) over failure to stop bog destruction, yet only
+      ~18 of 57 raised-bog SACs are monitored on the ground.</div>`;
+}
 
 /* ---- ranking ------------------------------------------------------------ */
 function renderRanking() {
@@ -269,7 +329,9 @@ function renderLegend() {
   const labels = [`< ${s[0]}`, `${s[0]}–${s[1]}`, `${s[1]}–${s[2]}`, `> ${s[2]}`];
   document.getElementById("legend").innerHTML = labels.map((t, i) =>
     `<span class="lg"><span class="sw" style="background:${COLORS[i]}"></span>${t} ${u}</span>`
-  ).join("");
+  ).join("") +
+    `<span class="lg"><span class="sw" style="background:transparent;
+      border:1.5px dashed #4bd8a0"></span>NPWS-documented site</span>`;
 }
 
 /* ---- selection ---------------------------------------------------------- */
@@ -339,6 +401,7 @@ dataPromise.then((fc) => {
     p.pct_gng = Math.round(1000 * (p.bare_now_gng_ha || 0) / s) / 10;
   });
   document.getElementById("coverage").textContent = `· ${FEATURES.length} bogs`;
+  renderInsight();
   renderRanking();
   renderLegend();
   // deep-link: #Site%20Name selects a bog on load (shareable)
@@ -351,9 +414,14 @@ map.on("load", async () => {
   const fc = await dataPromise;
   map.addSource("sites", { type: "geojson", data: fc });
   map.addLayer({ id: "sites-fill", type: "fill", source: "sites",
-    paint: { "fill-color": fillExpr(), "fill-opacity": 0.62 } });
+    paint: { "fill-color": fillExpr(), "fill-opacity": 0.7 } });
   map.addLayer({ id: "sites-line", type: "line", source: "sites",
-    paint: { "line-color": "#0b1f18", "line-width": 0.8 } });
+    paint: { "line-color": "#eafff5", "line-width": 0.6, "line-opacity": 0.5 } });
+  // documented NPWS hotspots: bright ring
+  map.addLayer({ id: "sites-hotspot", type: "line", source: "sites",
+    filter: [">", ["coalesce", ["get", "plots_2022"], -1], -1],
+    paint: { "line-color": "#4bd8a0", "line-width": 2.2,
+      "line-dasharray": [2, 1.4] } });
   map.addLayer({ id: "sites-sel", type: "line", source: "sites",
     paint: { "line-color": "#4bd8a0", "line-width": 2.4 },
     filter: ["==", ["get", "name"], "___none___"] });

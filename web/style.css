@@ -34,6 +34,43 @@ h1 { font-size: 18px; margin: 0 0 3px; letter-spacing: -0.01em; }
 
 #map { flex: 1; height: 100vh; }
 
+/* insight panel */
+#insight { padding-top: 14px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--line); }
+.ins-head { display: flex; flex-direction: column; margin-bottom: 12px; }
+.ins-big { font-size: 40px; font-weight: 800; line-height: 1; color: var(--hot);
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.ins-big .ins-unit { font-size: 17px; font-weight: 600; color: var(--muted);
+  margin-left: 5px; }
+.ins-cap { font-size: 12.5px; color: var(--muted); margin-top: 6px;
+  line-height: 1.4; }
+.ins-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin-bottom: 12px; }
+.ins-cell { background: rgba(255,255,255,0.04); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 6px; text-align: center; }
+.ins-cell b { display: block; font-size: 18px; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.ins-cell span { font-size: 10px; color: var(--muted-2); line-height: 1.2;
+  display: block; margin-top: 2px; }
+.ins-valid { background: rgba(75,216,160,0.08);
+  border: 1px solid rgba(75,216,160,0.28); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 12px; }
+.ins-valid-hd { font-size: 12px; font-weight: 700; color: var(--accent);
+  margin-bottom: 4px; }
+.ins-valid-body { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.ins-ctx { font-size: 11px; color: var(--muted-2); line-height: 1.6; }
+
+/* card validation banner */
+#card-valid { display: flex; gap: 9px; align-items: flex-start;
+  background: rgba(75,216,160,0.09); border: 1px solid rgba(75,216,160,0.3);
+  border-radius: 11px; padding: 11px 13px; margin-bottom: 12px;
+  font-size: 12.5px; color: #d6efe3; line-height: 1.5; }
+#card-valid.hidden { display: none; }
+#card-valid b { color: var(--accent); }
+.vd-icon { flex: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); color: #04140d; font-size: 12px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+
 /* controls */
 .controls { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .ctl { margin-bottom: 12px; }
