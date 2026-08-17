@@ -202,8 +202,6 @@ that can be inspected by a domain expert.
 
 - English throughout: code, comments, docs, commit messages.
 - One idea per commit; small, reviewable diffs.
-- See `CLAUDE.md` for attribution / authorship directives that apply to
-  any AI-assisted work in this repository.
 
 ## 12. Progress and to-do
 
@@ -222,26 +220,27 @@ access to a clipped, per-site area estimate. See
 
 - [x] Reproducible geospatial environment (`requirements.txt`, no system GDAL)
 - [x] Load NPWS boundaries, reproject to ITM, filter West-of-Ireland bogs
+- [x] SAC / SPA overlay — each bog tagged with its legal status (NHA / SAC / SPA)
 - [x] Programmatic Sentinel-2 access (STAC + windowed COG reads, no auth friction)
+- [x] Preprocessing: per-AOI cloud check via the SCL band + a brightness guard
+      so cloud/haze is not mistaken for bare peat
 - [x] NDVI-threshold baseline detector
-- [x] Polygon clip + area in hectares (cross-checked: 221.1 ha vs 221 ha NPWS record)
 - [x] Growing Neural Gas clustering on multi-spectral pixel vectors
-- [x] Visualisation (RGB / NDVI / detector overlays, single-site and gallery)
+- [x] Bare-peat label rule combining GNG clusters with a per-pixel NDVI criterion
+- [x] Polygon clip + area in hectares (cross-checked against the NPWS register)
+- [x] Multi-year change detection (2018→2024) — newly-bare, re-vegetated, rate/yr
+- [x] Batch pipeline across all 54 bogs with a per-site cache + GeoJSON export
+- [x] Interactive web map (ranking + per-bog card with year slider, GNG vs NDVI)
+- [x] Test suite + dataset-integrity validation (`docs/testing-and-validation.md`)
 
 ### To do
 
-- [ ] Change detection between two epochs (2020 vs 2025) — the "cutting now" signal
-- [ ] Cloud masking via the Sentinel-2 SCL band
 - [ ] K-means baseline detector for comparison
-- [ ] Calibrate the bare-peat label rule across site sizes (a naive
-      lowest-NDVI cluster over-selects on large low-vigour bogs — combine
-      GNG clusters with a per-pixel NDVI criterion)
 - [ ] Validation: point-based accuracy assessment against high-resolution
       imagery → precision / recall / confusion matrix
 - [ ] Separate legal / decommissioned works from illegal cutting
-- [ ] Batch run across all designated bog sites + summary table (CSV)
-- [ ] GeoJSON / shapefile export of detected polygons
-- [ ] Interactive web map
+- [ ] Mosaic across Sentinel-2 tiles (recover bogs that straddle a tile edge)
+- [ ] Time slider on the map itself (not only in the per-bog card)
 
 ## Licence
 
