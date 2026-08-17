@@ -23,6 +23,17 @@ NDVI_BARE = 0.25
 # masquerade as bare peat. Real exposed peat is dark brown (low reflectance),
 # so we refuse to call a pixel "bare" if it is too bright in the visible bands.
 BRIGHT_CAP = 0.30
+# Cluster-level thresholds for labelling a GNG cluster as bare/cut peat by its
+# spectral centroid (reflectance 0-1), calibrated on real signatures:
+#   vegetation  NDVI~0.63  SWIR1<<NIR
+#   bare peat   NDVI~0.10  SWIR1~=NIR  SWIR1~0.16
+#   water/shadow                        SWIR1~0
+# Node-centroid threshold, tuned on a site sweep: 0.25 under-detects subtle
+# bare patches, 0.30 leaks into the semi-vegetated bog matrix; 0.28 tracks the
+# NDVI baseline in magnitude while diverging both ways (catches transitional
+# bare NDVI's hard 0.25 cut-off misses, rejects water/shadow NDVI includes).
+NDVI_BARE_CLUSTER = 0.28
+SWIR_WATER_FLOOR = 0.07    # below this the node is water / deep shadow
 
 
 def _year_range(year):
@@ -42,27 +53,50 @@ def ndvi_bare(stack, order, ndvi, valid, inside, thresh=NDVI_BARE):
             & (brightness(stack, order) < BRIGHT_CAP))
 
 
-def gng_bare(stack, order, ndvi, valid, inside, thresh=NDVI_BARE, seed=42):
-    """Bare-peat mask from GNG clusters, refined by per-pixel NDVI.
+def _cluster_is_bare(centroid, order):
+    """Label a GNG cluster bare/cut peat from its spectral centroid.
 
-    GNG gives spatially coherent clusters; we keep the low-vigour ones
-    (mean NDVI below the scene mean) and require each pixel to be
-    genuinely bare (NDVI < thresh). Deterministic via a fixed seed.
+    Independent of the NDVI baseline: uses the full signature so the
+    cluster can be bare peat even where per-pixel NDVI just exceeds the
+    baseline cut-off, and is rejected when it is really water or shadow
+    (very low SWIR) or cloud (bright).
+    """
+    r = {b: centroid[i] for i, b in enumerate(order)}
+    ndvi_c = (r["nir"] - r["red"]) / (r["nir"] + r["red"] + 1e-9)
+    bright_c = (r["blue"] + r["green"] + r["red"]) / 3.0
+    return (ndvi_c < NDVI_BARE_CLUSTER          # not vegetation
+            and bright_c < BRIGHT_CAP           # not cloud
+            and r["swir1"] > SWIR_WATER_FLOOR)  # not water / deep shadow
+
+
+def gng_bare(stack, order, valid, inside, seed=42, max_nodes=80):
+    """Bare-peat mask from GNG multispectral clustering.
+
+    GNG learns a set of prototype spectra (nodes) that quantise the 6-band
+    signature space via Competitive Hebbian Learning. Each *node* is then
+    labelled bare/cut peat from its own spectral vector (see
+    `_cluster_is_bare` — low NDVI, not cloud, enough SWIR to exclude
+    water/shadow), and every pixel inherits its nearest node's label.
+
+    Labelling nodes (not connected components) keeps fine spectral
+    resolution and does not depend on the edge-pruning granularity, so a
+    small bare patch inside a spectrally homogeneous bog is still found.
+    The result uses the full signature, so it diverges from the NDVI
+    baseline in both directions. Deterministic via a fixed seed.
     """
     h, w, b = stack.shape
-    feats = stack.reshape(-1, b) / 10000.0
+    refl = stack / 10000.0
+    feats = refl.reshape(-1, b)
     rng = np.random.default_rng(seed)
     idx = rng.choice(len(feats), size=min(8000, len(feats)), replace=False)
-    net = gng.GrowingNeuralGas(max_nodes=40, rng=rng)
+    net = gng.GrowingNeuralGas(max_nodes=max_nodes, rng=rng)
     net.fit(feats[idx], n_steps=15000)
-    net.prune_long_edges(factor=1.0)
-    cluster = np.array([net.components()[n] for n in net.predict(feats)])
 
-    ndvi_flat = ndvi.reshape(-1)
-    scene_mean = float(ndvi_flat.mean())
-    low = [c for c in set(cluster)
-           if ndvi_flat[cluster == c].mean() < scene_mean]
-    mask = (np.isin(cluster, low) & (ndvi_flat < thresh)).reshape(h, w)
+    node_bare = np.array([_cluster_is_bare(net.weights[i], order)
+                          for i in range(len(net.weights))])
+    mask = node_bare[net.predict(feats)].reshape(h, w)
+    # per-pixel brightness guard removes any bright cloud pixel assigned to
+    # a bare node (does not tie the result to NDVI)
     return mask & valid & inside & (brightness(stack, order) < BRIGHT_CAP)
 
 
@@ -83,7 +117,7 @@ def detect_year(item, bbox, provider, shape, inside, scl):
     ndvi = detect.ndvi(red, nir)
     valid = preprocess.valid_mask(scl)
     ndvi_mask = ndvi_bare(stack, order, ndvi, valid, inside)
-    gng_mask = gng_bare(stack, order, ndvi, valid, inside)
+    gng_mask = gng_bare(stack, order, valid, inside)
     return {"ndvi": ndvi_mask, "gng": gng_mask, "valid": valid}
 
 

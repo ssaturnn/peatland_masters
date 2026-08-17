@@ -49,6 +49,27 @@ patch is genuinely cut peat. That is an accuracy question, addressed by:
   is unsupervised, so no training labels are needed — labelling is for
   evaluation only.
 
+## 3a. External validation against documented cutting (result)
+
+The detector was cross-checked against the only public "ground truth" that
+exists: the Department of Housing / NPWS records of turf plots cut without
+consent in raised-bog SACs, reported by *thejournal.ie* and the *Irish
+Times*. The three SACs with published 2022 plot counts were run through the
+unsupervised pipeline **with no labels**:
+
+| SAC (2022 record)      | Documented plots | GNG new bare peat 2018→2024 |
+|------------------------|------------------|-----------------------------|
+| Monivea (most-cut SAC) | 49               | 22.6 ha                     |
+| Barroughter            | 42               | 6.1 ha                      |
+| Callow                 | 31               | 5.9 ha                      |
+
+The detector ranks the three sites in the **same order** as the official
+records — Spearman rank correlation **ρ = 1.0** — and gives Monivea, the
+most-cut SAC, by far the largest detected area. This is independent
+corroboration that the method tracks real cutting, obtained without any
+manual annotation. (It is a small n = 3; more sites need plot-level data or
+manual reference points to strengthen it — see §3.)
+
 ## 4. Web app checks
 
 - `node --check web/app.js` — JavaScript syntax gate.

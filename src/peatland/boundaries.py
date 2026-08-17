@@ -62,21 +62,60 @@ def designation_label(in_sac, in_spa):
     return " + ".join(parts)
 
 
-def build_sites(min_overlap=0.05):
-    """Canonical site set: the West-of-Ireland NHA bogs, each tagged with
-    whether it also lies within an SAC / SPA (stronger legal status).
+# Turf plots cut in 2022 without State consent, from the Dept. of Housing /
+# NPWS records reported by thejournal.ie / Irish Times — used for external
+# cross-checking of the detector (keyed by SAC site code).
+DOCUMENTED_PLOTS_2022 = {
+    "002352": 49,  # Monivea Bog SAC (Galway) — most-cut SAC in 2022
+    "000231": 42,  # Barroughter Bog SAC (Galway)
+    "000595": 31,  # Callow Bog SAC (Roscommon)
+    # Corliskea/Trien/Cloonfelliv (002110) is a reported hotspot too, but the
+    # public source gives no exact 2022 plot count, so it is left unlabelled
+    # rather than assumed zero.
+}
 
-    The SAC/SPA boundary files carry no habitat attributes, so they can't
-    by themselves say which sites are peat — but the NHA bogs are already
-    a verified peat set, and overlaying SAC/SPA adds legal-status tags.
-    Returns a GeoDataFrame (ITM) with in_sac/in_spa/sac_frac/spa_frac and
-    a 'designation' string.
+
+def _primary_region_county(county_str):
+    for c in str(county_str).split(","):
+        c = c.strip()
+        if c in config.TARGET_COUNTIES:
+            return c
+    return None
+
+
+def _raised_bog_sacs(max_ha=1500):
+    """Region raised-bog SACs: SAC sites named '...bog' in Galway/Mayo/
+    Roscommon, small enough to be raised bogs (excludes the huge blanket-bog
+    complexes). Dissolved to one feature per site, county normalised.
     """
-    west = west_bog_sites(load_nha())
-    # Some sites are stored as several polygon rows sharing one SITECODE
-    # (multi-part bogs). Dissolve them into one feature per site, unioning
-    # geometry and summing the per-part hectares.
-    west = west.dissolve(
+    sac = load_sac()
+    sac = sac[sac["SITE_NAME"].str.contains("bog", case=False, na=False)].copy()
+    sac["cty"] = sac["COUNTY"].apply(_primary_region_county)
+    sac = sac[sac["cty"].notna() & (sac["HA"] < max_ha)]
+    sac = sac.dissolve(
+        by="SITECODE",
+        aggfunc={"SITE_NAME": "first", "cty": "first", "HA": "sum",
+                 "URL": "first"},
+        as_index=False,
+    ).reset_index(drop=True)
+    sac = sac.rename(columns={"cty": "COUNTY"})
+    return sac
+
+
+def build_sites(min_overlap=0.05, include_sac=True, sac_max_ha=1500):
+    """Canonical site set for the analysis.
+
+    * NHA bogs in Galway/Mayo/Roscommon (verified peat), each tagged with
+      whether it also lies within an SAC/SPA (stronger legal status).
+    * optionally, the region's raised-bog SACs — these carry the EU's
+      strongest protection and include the sites where illegal cutting is
+      actually documented, so the detector can be cross-checked against the
+      public plot-count records (`plots_2022`).
+
+    Returns a GeoDataFrame (ITM) with in_sac/in_spa, a 'designation' string,
+    'source' (NHA/SAC) and 'plots_2022'.
+    """
+    west = west_bog_sites(load_nha()).dissolve(
         by="SITECODE",
         aggfunc={"SITE_NAME": "first", "COUNTY": "first", "HA": "sum",
                  "URL": "first"},
@@ -89,10 +128,33 @@ def build_sites(min_overlap=0.05):
     west["spa_frac"] = west.geometry.apply(lambda g: _overlap_fraction(g, spa_u))
     west["in_sac"] = west["sac_frac"] >= min_overlap
     west["in_spa"] = west["spa_frac"] >= min_overlap
-    west["designation"] = [
-        designation_label(a, b) for a, b in zip(west["in_sac"], west["in_spa"])
-    ]
-    return west
+    west["designation"] = [designation_label(a, b)
+                           for a, b in zip(west["in_sac"], west["in_spa"])]
+    west["source"] = "NHA"
+    west["plots_2022"] = None
+
+    if not include_sac:
+        return west.reset_index(drop=True)
+
+    sac = _raised_bog_sacs(sac_max_ha)
+    # avoid duplicating a bog we already have as NHA (same footprint)
+    nha_u = _union(west)
+    sac["nha_frac"] = sac.geometry.apply(lambda g: _overlap_fraction(g, nha_u))
+    sac = sac[sac["nha_frac"] < 0.5].copy()
+    sac["spa_frac"] = sac.geometry.apply(lambda g: _overlap_fraction(g, spa_u))
+    sac["sac_frac"] = 1.0
+    sac["in_sac"] = True
+    sac["in_spa"] = sac["spa_frac"] >= min_overlap
+    sac["designation"] = ["SAC + SPA" if s else "SAC" for s in sac["in_spa"]]
+    sac["source"] = "SAC"
+    sac["plots_2022"] = sac["SITECODE"].map(DOCUMENTED_PLOTS_2022)
+
+    cols = ["SITECODE", "SITE_NAME", "COUNTY", "HA", "geometry", "sac_frac",
+            "spa_frac", "in_sac", "in_spa", "designation", "source", "plots_2022"]
+    import pandas as pd
+    combined = gpd.GeoDataFrame(
+        pd.concat([west[cols], sac[cols]], ignore_index=True), crs=west.crs)
+    return combined.reset_index(drop=True)
 
 
 def site_bbox_wgs84(gdf, row_label, buffer_m=300):

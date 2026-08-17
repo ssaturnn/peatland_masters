@@ -28,11 +28,15 @@ def properties(row, r):
     ndvi_now = r["ndvi_series"][-1] if r["ndvi_series"] else 0.0
     gng_now = r["gng_series"][-1] if r["gng_series"] else 0.0
     site_ha = r["site_ha"]
+    plots = row.get("plots_2022")
     return {
         "code": row["SITECODE"],
         "name": row["SITE_NAME"],
         "county": config.TARGET_COUNTIES[row["COUNTY"]],
         "designation": row["designation"],
+        "source": row.get("source", "NHA"),
+        "plots_2022": None if plots is None or (isinstance(plots, float)
+                      and plots != plots) else int(plots),
         "site_ha": site_ha,
         "years": r["years"],
         "ndvi_series": r["ndvi_series"],

@@ -95,7 +95,7 @@ def process_site(row, bbox):
         ndvi = detect.ndvi(red, nir)
         valid = preprocess.valid_mask(rep["scl"])
         ndvi_mask = pipeline.ndvi_bare(stack, order, ndvi, valid, inside)
-        gng_mask = pipeline.gng_bare(stack, order, ndvi, valid, inside)
+        gng_mask = pipeline.gng_bare(stack, order, valid, inside)
         rgb = natural_rgb(stack, order)
         # haze guard: SCL sometimes passes thin cloud/haze as clear. If too
         # much of the bog is near-white, skip — the card shows "no clear
