@@ -22,21 +22,29 @@ const map = new maplibregl.Map({
       carto: {
         type: "raster",
         tiles: [
-          "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-          "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-          "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+          "https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png",
+          "https://b.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png",
+          "https://c.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png",
         ],
         tileSize: 256,
         attribution: "© OpenStreetMap contributors © CARTO",
       },
+      cartoLabels: {
+        type: "raster",
+        tiles: [
+          "https://a.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png",
+          "https://b.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png",
+        ],
+        tileSize: 256, attribution: "© CARTO",
+      },
     },
     layers: [
-      { id: "bg", type: "background", paint: { "background-color": "#0a1712" } },
+      { id: "bg", type: "background", paint: { "background-color": "#eef2ee" } },
       { id: "carto", type: "raster", source: "carto",
-        paint: { "raster-opacity": 0.9, "raster-saturation": -0.2 } },
+        paint: { "raster-opacity": 0.55, "raster-saturation": -0.55 } },
     ],
   },
-  center: [-8.9, 53.6], zoom: 7.4,
+  center: [-8.75, 53.55], zoom: 7.6,
 });
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 
@@ -55,6 +63,45 @@ function fillExpr() {
   const s = M().stops, p = curProp();
   return ["step", ["coalesce", ["get", p], 0],
     COLORS[0], s[0], COLORS[1], s[1], COLORS[2], s[2], COLORS[3]];
+}
+
+// proportional-symbol radius: area-perception (sqrt) scaled per metric so a
+// worst-in-class site reads big and a quiet one reads small, on any zoom.
+const RADIUS_REF = { new: 60, rate: 2, pct: 15 };
+function radiusExpr(extra = 0) {
+  const p = curProp(), ref = RADIUS_REF[state.metric];
+  return ["+", extra, ["interpolate", ["linear"],
+    ["sqrt", ["min", 1, ["/", ["max", 0, ["coalesce", ["get", p], 0]], ref]]],
+    0, 5, 1, 30]];
+}
+
+function centroid(geom) {
+  try {
+    let ring;
+    if (geom.type === "MultiPolygon") {
+      ring = geom.coordinates.map((poly) => poly[0])
+        .sort((a, b) => b.length - a.length)[0];
+    } else if (geom.type === "Polygon") {
+      ring = geom.coordinates[0];
+    } else { return null; }
+    if (!ring || !ring.length) return null;
+    let x = 0, y = 0;
+    ring.forEach((c) => { x += c[0]; y += c[1]; });
+    return [x / ring.length, y / ring.length];
+  } catch (e) { return null; }
+}
+
+function pointsFC() {
+  return {
+    type: "FeatureCollection",
+    features: FEATURES.map((f) => ({
+      c: centroid(f.geometry), p: f.properties,
+    })).filter((o) => o.c).map((o) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: o.c },
+      properties: o.p,
+    })),
+  };
 }
 
 function filterExpr() {
@@ -327,11 +374,12 @@ function renderRanking() {
 function renderLegend() {
   const s = M().stops, u = M().unit;
   const labels = [`< ${s[0]}`, `${s[0]}–${s[1]}`, `${s[1]}–${s[2]}`, `> ${s[2]}`];
-  document.getElementById("legend").innerHTML = labels.map((t, i) =>
-    `<span class="lg"><span class="sw" style="background:${COLORS[i]}"></span>${t} ${u}</span>`
-  ).join("") +
-    `<span class="lg"><span class="sw" style="background:transparent;
-      border:1.5px dashed #4bd8a0"></span>NPWS-documented site</span>`;
+  document.getElementById("legend").innerHTML =
+    `<div class="lg-note">Circle colour &amp; size — ${M().label.toLowerCase()} (${u})
+       per bog · ◍ ring = NPWS-documented site</div>` +
+    labels.map((t, i) =>
+      `<span class="lg"><span class="dot" style="background:${COLORS[i]}"></span>${t} ${u}</span>`
+    ).join("");
 }
 
 /* ---- selection ---------------------------------------------------------- */
@@ -342,13 +390,13 @@ function selectByName(name, fly) {
   if (history.replaceState)
     history.replaceState(null, "", "#" + encodeURIComponent(name));
   openCard(f.properties);
-  if (map.getLayer("sites-sel"))
-    map.setFilter("sites-sel", ["==", ["get", "name"], name]);
+  if (map.getLayer("bog-sel"))
+    map.setFilter("bog-sel", ["==", ["get", "name"], name]);
   renderRanking();
-  if (fly && map.getLayer("sites-fill")) {
+  if (fly && map.getLayer("bog-circles")) {
     const b = new maplibregl.LngLatBounds();
     eachCoord(f.geometry, (c) => b.extend(c));
-    if (!b.isEmpty()) map.fitBounds(b, { padding: 80, maxZoom: 13, duration: 600 });
+    if (!b.isEmpty()) map.fitBounds(b, { padding: 90, maxZoom: 12.5, duration: 700 });
   }
 }
 
@@ -360,10 +408,19 @@ function eachCoord(geom, cb) {
 
 /* ---- refresh all view state -------------------------------------------- */
 function refresh() {
-  if (map.getLayer("sites-fill")) {
+  if (map.getLayer("bog-circles")) {
+    const flt = filterExpr();
     map.setPaintProperty("sites-fill", "fill-color", fillExpr());
-    map.setFilter("sites-fill", filterExpr());
-    map.setFilter("sites-line", filterExpr());
+    map.setFilter("sites-fill", flt);
+    map.setFilter("sites-line", flt);
+    map.setPaintProperty("bog-circles", "circle-color", fillExpr());
+    map.setPaintProperty("bog-circles", "circle-radius", radiusExpr());
+    map.setFilter("bog-circles", flt);
+    map.setPaintProperty("bog-sel", "circle-radius", radiusExpr(5));
+    map.setPaintProperty("bog-hotspot", "circle-radius", radiusExpr(4.5));
+    // keep hotspot rings within the active filter too
+    const hs = [">", ["coalesce", ["get", "plots_2022"], -1], -1];
+    map.setFilter("bog-hotspot", flt ? ["all", flt, hs] : hs);
   }
   renderRanking();
   renderLegend();
@@ -412,28 +469,47 @@ dataPromise.then((fc) => {
 
 map.on("load", async () => {
   const fc = await dataPromise;
+
+  // actual bog shapes — subtle fill, shown mostly on zoom-in for context
   map.addSource("sites", { type: "geojson", data: fc });
   map.addLayer({ id: "sites-fill", type: "fill", source: "sites",
-    paint: { "fill-color": fillExpr(), "fill-opacity": 0.7 } });
+    paint: { "fill-color": fillExpr(),
+      "fill-opacity": ["interpolate", ["linear"], ["zoom"], 8, 0.12, 12, 0.5] } });
   map.addLayer({ id: "sites-line", type: "line", source: "sites",
-    paint: { "line-color": "#eafff5", "line-width": 0.6, "line-opacity": 0.5 } });
-  // documented NPWS hotspots: bright ring
-  map.addLayer({ id: "sites-hotspot", type: "line", source: "sites",
+    paint: { "line-color": "#2b5a49", "line-width": 0.7, "line-opacity": 0.55 } });
+
+  // place labels on top of the muted basemap, kept light
+  map.addLayer({ id: "labels", type: "raster", source: "cartoLabels",
+    paint: { "raster-opacity": 0.85 } });
+
+  // proportional symbols — the primary, always-legible layer
+  map.addSource("points", { type: "geojson", data: pointsFC() });
+  map.addLayer({ id: "bog-circles", type: "circle", source: "points",
+    paint: {
+      "circle-radius": radiusExpr(),
+      "circle-color": fillExpr(),
+      "circle-opacity": 0.9,
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 1.4,
+    } });
+  map.addLayer({ id: "bog-hotspot", type: "circle", source: "points",
     filter: [">", ["coalesce", ["get", "plots_2022"], -1], -1],
-    paint: { "line-color": "#4bd8a0", "line-width": 2.2,
-      "line-dasharray": [2, 1.4] } });
-  map.addLayer({ id: "sites-sel", type: "line", source: "sites",
-    paint: { "line-color": "#4bd8a0", "line-width": 2.4 },
-    filter: ["==", ["get", "name"], "___none___"] });
+    paint: { "circle-radius": radiusExpr(4.5), "circle-color": "rgba(0,0,0,0)",
+      "circle-stroke-color": "#0b7d63", "circle-stroke-width": 2.4,
+      "circle-stroke-opacity": 0.95 } });
+  map.addLayer({ id: "bog-sel", type: "circle", source: "points",
+    filter: ["==", ["get", "name"], "___none___"],
+    paint: { "circle-radius": radiusExpr(6), "circle-color": "rgba(0,0,0,0)",
+      "circle-stroke-color": "#0f766e", "circle-stroke-width": 3 } });
 
   const b = new maplibregl.LngLatBounds();
-  FEATURES.forEach((f) => eachCoord(f.geometry, (c) => b.extend(c)));
-  if (!b.isEmpty()) map.fitBounds(b, { padding: 50, maxZoom: 10, duration: 0 });
+  FEATURES.forEach((f) => b.extend(centroid(f.geometry)));
+  if (!b.isEmpty()) map.fitBounds(b, { padding: 60, maxZoom: 9, duration: 0 });
 
-  map.on("click", "sites-fill", (e) => selectByName(e.features[0].properties.name, false));
-  map.on("mouseenter", "sites-fill", () => map.getCanvas().style.cursor = "pointer");
-  map.on("mouseleave", "sites-fill", () => map.getCanvas().style.cursor = "");
+  const pick = (e) => selectByName(e.features[0].properties.name, false);
+  map.on("click", "bog-circles", pick);
+  map.on("mouseenter", "bog-circles", () => map.getCanvas().style.cursor = "pointer");
+  map.on("mouseleave", "bog-circles", () => map.getCanvas().style.cursor = "");
 
-  renderRanking();
-  renderLegend();
+  refresh();
 });

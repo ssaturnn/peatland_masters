@@ -148,6 +148,10 @@ select { flex: 1; background: var(--panel); color: var(--ink);
   font-size: 11px; color: var(--muted); }
 .lg { display: flex; align-items: center; gap: 5px; }
 .lg .sw { width: 13px; height: 11px; border-radius: 2px; }
+.lg .dot { width: 11px; height: 11px; border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.25); }
+.lg-note { flex-basis: 100%; font-size: 10.5px; color: var(--muted-2);
+  line-height: 1.4; margin-bottom: 5px; }
 .disclaimer { font-size: 10.5px; color: var(--muted-2); line-height: 1.5;
   margin: 0; }
 
