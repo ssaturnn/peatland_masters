@@ -57,18 +57,29 @@ consent in raised-bog SACs, reported by *thejournal.ie* and the *Irish
 Times*. The three SACs with published 2022 plot counts were run through the
 unsupervised pipeline **with no labels**:
 
-| SAC (2022 record)      | Documented plots | GNG new bare peat 2018→2024 |
-|------------------------|------------------|-----------------------------|
-| Monivea (most-cut SAC) | 49               | 22.6 ha                     |
-| Barroughter            | 42               | 6.1 ha                      |
-| Callow                 | 31               | 5.9 ha                      |
+| SAC (2022 record)      | Documented plots | Detected new bare peat 2018→2024 |
+|------------------------|------------------|----------------------------------|
+| Monivea (most-cut SAC) | 49               | 19.2 ha                          |
+| Barroughter            | 42               | 2.9 ha                           |
+| Callow                 | 31               | 8.6 ha                           |
 
-The detector ranks the three sites in the **same order** as the official
-records — Spearman rank correlation **ρ = 1.0** — and gives Monivea, the
-most-cut SAC, by far the largest detected area. This is independent
-corroboration that the method tracks real cutting, obtained without any
-manual annotation. (It is a small n = 3; more sites need plot-level data or
-manual reference points to strengthen it — see §3.)
+All three documented hotspots are flagged as actively cutting, and
+**Monivea — the most-cut SAC on record — is by a wide margin the largest
+detection**, so the method clearly tracks real activity without any manual
+annotation. The exact ordering of the two smaller sites does not match the
+plot counts (Barroughter has more *plots* but less detected *area* than
+Callow): plot count and hectares are different measures, the records are for
+2022 while the detection is a 2018→2024 change, and n = 3 is small. So this
+is corroboration of the signal, not a precision figure; a proper accuracy
+assessment (§3) still needs plot-level or point-level reference data.
+
+**Where GNG beats the NDVI baseline — a worked example.** At Rosroe Bog SAC
+(2018) the NDVI baseline flags 1.2 ha of "bare peat" that is in fact the
+site's open lough (SWIR ≈ 0.02, NIR ≈ 0.00 — water, not peat). GNG rejects
+it via the SWIR signature and reports 0 ha, while still matching NDVI on the
+real bare peat in later years. This is the detector's designed contribution:
+NDVI-level sensitivity, with the full spectrum removing the water and shadow
+a vegetation index cannot tell apart from bare peat.
 
 ## 4. Web app checks
 

@@ -28,12 +28,11 @@ BRIGHT_CAP = 0.30
 #   vegetation  NDVI~0.63  SWIR1<<NIR
 #   bare peat   NDVI~0.10  SWIR1~=NIR  SWIR1~0.16
 #   water/shadow                        SWIR1~0
-# Node-centroid threshold, tuned on a site sweep: 0.25 under-detects subtle
-# bare patches, 0.30 leaks into the semi-vegetated bog matrix; 0.28 tracks the
-# NDVI baseline in magnitude while diverging both ways (catches transitional
-# bare NDVI's hard 0.25 cut-off misses, rejects water/shadow NDVI includes).
-NDVI_BARE_CLUSTER = 0.28
-SWIR_WATER_FLOOR = 0.07    # below this the node is water / deep shadow
+# Per-pixel NDVI cut-off used inside the GNG detector — the same sensitivity
+# as the 0.25 baseline, so GNG finds all the real bare peat NDVI does, while
+# the SWIR test below removes the water/shadow that fools a bare NDVI.
+GNG_BARE_NDVI = 0.25
+SWIR_WATER_FLOOR = 0.07    # below this a prototype is water / deep shadow
 
 
 def _year_range(year):
@@ -53,36 +52,29 @@ def ndvi_bare(stack, order, ndvi, valid, inside, thresh=NDVI_BARE):
             & (brightness(stack, order) < BRIGHT_CAP))
 
 
-def _cluster_is_bare(centroid, order):
-    """Label a GNG cluster bare/cut peat from its spectral centroid.
-
-    Independent of the NDVI baseline: uses the full signature so the
-    cluster can be bare peat even where per-pixel NDVI just exceeds the
-    baseline cut-off, and is rejected when it is really water or shadow
-    (very low SWIR) or cloud (bright).
-    """
-    r = {b: centroid[i] for i, b in enumerate(order)}
-    ndvi_c = (r["nir"] - r["red"]) / (r["nir"] + r["red"] + 1e-9)
-    bright_c = (r["blue"] + r["green"] + r["red"]) / 3.0
-    return (ndvi_c < NDVI_BARE_CLUSTER          # not vegetation
-            and bright_c < BRIGHT_CAP           # not cloud
-            and r["swir1"] > SWIR_WATER_FLOOR)  # not water / deep shadow
+def _node_is_nonpeat(weight, order):
+    """A GNG prototype that is water or deep shadow — very low SWIR — i.e.
+    a low-NDVI surface that is NOT exposed peat."""
+    return weight[order.index("swir1")] < SWIR_WATER_FLOOR
 
 
-def gng_bare(stack, order, valid, inside, seed=42, max_nodes=80):
-    """Bare-peat mask from GNG multispectral clustering.
+def gng_bare(stack, order, valid, inside, seed=42, max_nodes=80,
+             thresh=GNG_BARE_NDVI):
+    """Bare-peat mask: NDVI sensitivity refined by GNG multispectral clustering.
 
-    GNG learns a set of prototype spectra (nodes) that quantise the 6-band
-    signature space via Competitive Hebbian Learning. Each *node* is then
-    labelled bare/cut peat from its own spectral vector (see
-    `_cluster_is_bare` — low NDVI, not cloud, enough SWIR to exclude
-    water/shadow), and every pixel inherits its nearest node's label.
+    GNG learns prototype spectra (nodes) over the full 6-band signature via
+    Competitive Hebbian Learning. Its job here is discrimination the NDVI
+    baseline cannot do: any pixel whose nearest prototype is water or deep
+    shadow (very low SWIR) is rejected, even when its NDVI is low. Within
+    the remaining (peat-plausible) prototypes, a pixel is bare if its own
+    NDVI is below `thresh` — so small cut patches are still found, unlike a
+    pure node-label rule.
 
-    Labelling nodes (not connected components) keeps fine spectral
-    resolution and does not depend on the edge-pruning granularity, so a
-    small bare patch inside a spectrally homogeneous bog is still found.
-    The result uses the full signature, so it diverges from the NDVI
-    baseline in both directions. Deterministic via a fixed seed.
+    So the detector keeps the sensitivity of the NDVI baseline (it finds the
+    same real bare peat) but adds spectral specificity: it removes the
+    low-NDVI water and shadow that a vegetation index alone mistakes for bare
+    peat. On a bog with open water this is a visible correction; on a clean
+    bog the two agree. Deterministic via a fixed seed.
     """
     h, w, b = stack.shape
     refl = stack / 10000.0
@@ -92,12 +84,15 @@ def gng_bare(stack, order, valid, inside, seed=42, max_nodes=80):
     net = gng.GrowingNeuralGas(max_nodes=max_nodes, rng=rng)
     net.fit(feats[idx], n_steps=15000)
 
-    node_bare = np.array([_cluster_is_bare(net.weights[i], order)
-                          for i in range(len(net.weights))])
-    mask = node_bare[net.predict(feats)].reshape(h, w)
-    # per-pixel brightness guard removes any bright cloud pixel assigned to
-    # a bare node (does not tie the result to NDVI)
-    return mask & valid & inside & (brightness(stack, order) < BRIGHT_CAP)
+    node_nonpeat = np.array([_node_is_nonpeat(net.weights[i], order)
+                             for i in range(len(net.weights))])
+    peat_node = ~node_nonpeat[net.predict(feats)].reshape(h, w)
+
+    red = refl[:, :, order.index("red")]
+    nir = refl[:, :, order.index("nir")]
+    ndvi = (nir - red) / (nir + red + 1e-9)
+    return ((ndvi < thresh) & peat_node & valid & inside
+            & (brightness(stack, order) < BRIGHT_CAP))
 
 
 def detect_year(item, bbox, provider, shape, inside, scl):
