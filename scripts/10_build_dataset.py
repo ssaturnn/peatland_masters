@@ -37,6 +37,8 @@ def properties(row, r):
         "source": row.get("source", "NHA"),
         "plots_2022": None if plots is None or (isinstance(plots, float)
                       and plots != plots) else int(plots),
+        "plots_2021": (lambda v: None if v is None or (isinstance(v, float)
+                       and v != v) else int(v))(row.get("plots_2021")),
         "site_ha": site_ha,
         "years": r["years"],
         "ndvi_series": r["ndvi_series"],

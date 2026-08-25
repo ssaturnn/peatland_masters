@@ -17,7 +17,15 @@ import numpy as np
 from . import imagery, detect, geo, gng
 
 BANDS = ["blue", "green", "red", "nir", "swir1", "swir2"]
-YEARS = [2018, 2020, 2022, 2024]
+# Annual survey points, each sampled in a FIXED seasonal window (May 1 –
+# July 15): the turf-cutting season, when freshly cut banks and spread turf
+# are most visible, and a constant season keeps years comparable (a May
+# scene and a September scene of the same bog can differ several-fold from
+# phenology alone). Per year the detector takes the MAXIMUM bare area over
+# every clear scene in the window — the peak visible extraction state —
+# which removes the single-acquisition-date lottery.
+YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+SEASON = ("05-01", "07-15")
 NDVI_BARE = 0.25
 # Clouds/haze that the SCL mask misses are bright and low-NDVI, so they can
 # masquerade as bare peat. Real exposed peat is dark brown (low reflectance),
@@ -33,10 +41,15 @@ BRIGHT_CAP = 0.30
 # the SWIR test below removes the water/shadow that fools a bare NDVI.
 GNG_BARE_NDVI = 0.25
 SWIR_WATER_FLOOR = 0.07    # below this a prototype is water / deep shadow
+# Burn discrimination: spring gorse/bog fires leave low-NDVI scars that mimic
+# cut peat. NBR = (NIR-SWIR2)/(NIR+SWIR2) separates them cleanly — measured
+# on our own data: real cut peat at Monivea NBR ≈ +0.09 (p10 +0.02), a burn
+# scar at Moorfield NBR ≈ −0.13. Pixels at or below the floor are burns.
+BURN_NBR_FLOOR = 0.0
 
 
 def _year_range(year):
-    return f"{year}-05-01/{year}-09-15"
+    return f"{year}-{SEASON[0]}/{year}-{SEASON[1]}"
 
 
 def brightness(stack, order):
@@ -52,47 +65,75 @@ def ndvi_bare(stack, order, ndvi, valid, inside, thresh=NDVI_BARE):
             & (brightness(stack, order) < BRIGHT_CAP))
 
 
-def _node_is_nonpeat(weight, order):
-    """A GNG prototype that is water or deep shadow — very low SWIR — i.e.
-    a low-NDVI surface that is NOT exposed peat."""
-    return weight[order.index("swir1")] < SWIR_WATER_FLOOR
+# Feature vector fed to the GNG: the 6 bands plus three physically meaningful
+# indices, all z-scored per scene. Standardization stops the high-variance
+# NIR/SWIR bands from dominating the Euclidean BMU step (Wongoutong 2024);
+# ratio indices add illumination-invariant structure (NDVI vegetation vigour,
+# MNDWI water/shadow, NBR2 dry-bare-surface).
+GNG_FEATURES = ["blue", "green", "red", "nir", "swir1", "swir2",
+                "ndvi", "mndwi", "nbr2"]
+
+
+def _gng_feature_stack(refl, order):
+    """(H,W,9) raw feature stack: reflectance bands + NDVI, MNDWI, NBR2."""
+    red = refl[:, :, order.index("red")]
+    nir = refl[:, :, order.index("nir")]
+    green = refl[:, :, order.index("green")]
+    swir1 = refl[:, :, order.index("swir1")]
+    swir2 = refl[:, :, order.index("swir2")]
+    ndvi = (nir - red) / (nir + red + 1e-9)
+    mndwi = (green - swir1) / (green + swir1 + 1e-9)
+    nbr2 = (swir1 - swir2) / (swir1 + swir2 + 1e-9)
+    return np.dstack([refl, ndvi, mndwi, nbr2])
+
+
+def _nonpeat_nodes(weights_raw):
+    """Prototypes that are water or deep shadow, from de-standardized
+    feature values: MNDWI > 0 is the standard water signal (McFeeters/Xu),
+    and a very low SWIR1 catches dark shadow that MNDWI can miss."""
+    mndwi = weights_raw[:, GNG_FEATURES.index("mndwi")]
+    swir1 = weights_raw[:, GNG_FEATURES.index("swir1")]
+    return (mndwi > 0.0) | (swir1 < SWIR_WATER_FLOOR)
 
 
 def gng_bare(stack, order, valid, inside, seed=42, max_nodes=80,
              thresh=GNG_BARE_NDVI):
     """Bare-peat mask: NDVI sensitivity refined by GNG multispectral clustering.
 
-    GNG learns prototype spectra (nodes) over the full 6-band signature via
-    Competitive Hebbian Learning. Its job here is discrimination the NDVI
-    baseline cannot do: any pixel whose nearest prototype is water or deep
-    shadow (very low SWIR) is rejected, even when its NDVI is low. Within
-    the remaining (peat-plausible) prototypes, a pixel is bare if its own
-    NDVI is below `thresh` — so small cut patches are still found, unlike a
-    pure node-label rule.
+    GNG learns prototype spectra over a 9-D standardized feature space
+    (6 bands + NDVI/MNDWI/NBR2, z-scored per scene) via Competitive Hebbian
+    Learning. Its job is discrimination the NDVI baseline cannot do: any
+    pixel whose nearest prototype is water or deep shadow (MNDWI > 0 or very
+    low SWIR1) is rejected even when its NDVI is low. Within the remaining
+    peat-plausible prototypes, a pixel is bare if its own NDVI is below
+    `thresh` — so small cut patches are still found.
 
-    So the detector keeps the sensitivity of the NDVI baseline (it finds the
-    same real bare peat) but adds spectral specificity: it removes the
-    low-NDVI water and shadow that a vegetation index alone mistakes for bare
-    peat. On a bog with open water this is a visible correction; on a clean
-    bog the two agree. Deterministic via a fixed seed.
+    Net effect: the sensitivity of the NDVI baseline on real bare peat, plus
+    spectral specificity against the water/shadow a vegetation index alone
+    mistakes for bare peat. Deterministic via a fixed seed.
     """
     h, w, b = stack.shape
     refl = stack / 10000.0
-    feats = refl.reshape(-1, b)
+    raw = _gng_feature_stack(refl, order).reshape(-1, len(GNG_FEATURES))
+    mu = raw.mean(axis=0)
+    sd = raw.std(axis=0) + 1e-9
+    feats = (raw - mu) / sd
+
     rng = np.random.default_rng(seed)
     idx = rng.choice(len(feats), size=min(8000, len(feats)), replace=False)
     net = gng.GrowingNeuralGas(max_nodes=max_nodes, rng=rng)
     net.fit(feats[idx], n_steps=15000)
 
-    node_nonpeat = np.array([_node_is_nonpeat(net.weights[i], order)
-                             for i in range(len(net.weights))])
+    weights_raw = net.weights * sd + mu          # back to physical units
+    node_nonpeat = _nonpeat_nodes(weights_raw)
     peat_node = ~node_nonpeat[net.predict(feats)].reshape(h, w)
 
-    red = refl[:, :, order.index("red")]
+    ndvi = raw[:, GNG_FEATURES.index("ndvi")].reshape(h, w)
     nir = refl[:, :, order.index("nir")]
-    ndvi = (nir - red) / (nir + red + 1e-9)
-    return ((ndvi < thresh) & peat_node & valid & inside
-            & (brightness(stack, order) < BRIGHT_CAP))
+    swir2 = refl[:, :, order.index("swir2")]
+    nbr = (nir - swir2) / (nir + swir2 + 1e-9)   # burn scars: NBR <= 0
+    return ((ndvi < thresh) & peat_node & (nbr > BURN_NBR_FLOOR)
+            & valid & inside & (brightness(stack, order) < BRIGHT_CAP))
 
 
 def detect_year(item, bbox, provider, shape, inside, scl):
@@ -153,23 +194,31 @@ def process_site(row, bbox, provider, years=YEARS):
     per_year = {}
     masks_first = masks_last = None
     for i, yr in enumerate(years):
-        item, rep = preprocess.pick_clear_scene(
+        # season-max: every clear scene in the fixed window; the year's
+        # figure is the peak visible bare area (see YEARS comment above)
+        scenes = preprocess.clear_scenes(
             provider, bbox, _year_range(yr), shape,
-            aoi_mask=inside, min_clear=0.92, limit=12)
-        if item is None:
+            aoi_mask=inside, min_clear=0.85)
+        if not scenes:
             per_year[yr] = None
             continue
-        d = detect_year(item, bbox, provider, shape, inside, rep["scl"])
-        per_year[yr] = {
-            "date": rep["datetime"][:10],
-            "ndvi_ha": round(geo.mask_area_ha(d["ndvi"], transform), 2),
-            "gng_ha": round(geo.mask_area_ha(d["gng"], transform), 2),
-            "clear": round(rep["aoi_clear"], 3),
-            "_masks": d,
-        }
+        best = None
+        for item, rep in scenes:
+            d = detect_year(item, bbox, provider, shape, inside, rep["scl"])
+            g = geo.mask_area_ha(d["gng"], transform)
+            if best is None or g > best["gng_ha"]:
+                best = {
+                    "date": rep["datetime"][:10],
+                    "ndvi_ha": round(geo.mask_area_ha(d["ndvi"], transform), 2),
+                    "gng_ha": round(g, 2),
+                    "clear": round(rep["aoi_clear"], 3),
+                    "n_scenes": len(scenes),
+                    "_masks": d,
+                }
+        per_year[yr] = best
         if masks_first is None:
-            masks_first = (yr, d, inside)
-        masks_last = (yr, d, inside)
+            masks_first = (yr, best["_masks"], inside)
+        masks_last = (yr, best["_masks"], inside)
 
     site_ha = round(geo.mask_area_ha(inside, transform), 1)
     valid_years = [y for y in years if per_year.get(y)]

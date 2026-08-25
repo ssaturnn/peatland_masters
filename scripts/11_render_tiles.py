@@ -62,6 +62,17 @@ def render(rgb, gng_mask, ndvi_mask, inside, out_path):
     plt.close(fig)
 
 
+def _cache_dates(code):
+    """year -> chosen max-activity scene date, from the dataset cache, so
+    the rendered picture matches the numbers on the card."""
+    f = config.OUT_DIR / "cache" / f"{code}.json"
+    if not f.exists():
+        return {}
+    import json
+    r = json.loads(f.read_text())
+    return {int(y): d for y, d in zip(r.get("years", []), r.get("dates", []))}
+
+
 def process_site(row, bbox):
     ref = imagery.search_scene(PROVIDER, bbox, "2021-05-01/2021-09-15",
                                max_cloud=40)
@@ -71,15 +82,24 @@ def process_site(row, bbox):
     shape = red0.shape
     geom = gpd.GeoSeries([row["geometry"]], crs=config.ITM).to_crs(crs).iloc[0]
     inside = geo.polygon_mask(geom, shape, transform)
+    dates = _cache_dates(row["SITECODE"])
 
     made = 0
     for yr in YEARS:
         out = OUT_DIR / f"{row['SITECODE']}_{yr}.jpg"
         if out.exists():
             continue
+        # render the exact scene the dataset chose for this year, so the
+        # image matches the reported number; fall back to clearest-in-window
+        rng = (f"{dates[yr]}/{dates[yr]}" if yr in dates
+               else pipeline._year_range(yr))
         item, rep = preprocess.pick_clear_scene(
-            PROVIDER, bbox, f"{yr}-05-01/{yr}-09-15", shape,
-            aoi_mask=inside, min_clear=0.92, limit=12)
+            PROVIDER, bbox, rng, shape,
+            aoi_mask=inside, min_clear=0.80, limit=12)
+        if item is None and yr in dates:
+            item, rep = preprocess.pick_clear_scene(
+                PROVIDER, bbox, pipeline._year_range(yr), shape,
+                aoi_mask=inside, min_clear=0.85, limit=12)
         if item is None:
             continue
         # don't render a visibly cloudy tile — the card shows "no clear

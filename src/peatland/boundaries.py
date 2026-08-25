@@ -74,6 +74,15 @@ DOCUMENTED_PLOTS_2022 = {
     # rather than assumed zero.
 }
 
+# 2021 plot counts (NPWS records via FOI, reported by Noteworthy/thejournal.ie
+# Jan 2022; 282 plots across SACs in 2021, ~320/yr average since 2012).
+DOCUMENTED_PLOTS_2021 = {
+    "002352": 51,  # Monivea Bog SAC — the most-cut SAC (70 banks back in 2013)
+    "000595": 22,  # Callow Bog SAC
+    "000600": 22,  # Cloonchambers Bog SAC (Roscommon)
+    "002349": 11,  # Corbo Bog SAC (Roscommon; also 11 plots in 2012)
+}
+
 
 def _primary_region_county(county_str):
     for c in str(county_str).split(","):
@@ -132,6 +141,7 @@ def build_sites(min_overlap=0.05, include_sac=True, sac_max_ha=1500):
                            for a, b in zip(west["in_sac"], west["in_spa"])]
     west["source"] = "NHA"
     west["plots_2022"] = None
+    west["plots_2021"] = None
 
     if not include_sac:
         return west.reset_index(drop=True)
@@ -148,9 +158,10 @@ def build_sites(min_overlap=0.05, include_sac=True, sac_max_ha=1500):
     sac["designation"] = ["SAC + SPA" if s else "SAC" for s in sac["in_spa"]]
     sac["source"] = "SAC"
     sac["plots_2022"] = sac["SITECODE"].map(DOCUMENTED_PLOTS_2022)
+    sac["plots_2021"] = sac["SITECODE"].map(DOCUMENTED_PLOTS_2021)
 
     cols = ["SITECODE", "SITE_NAME", "COUNTY", "HA", "geometry", "sac_frac",
-            "spa_frac", "in_sac", "in_spa", "designation", "source", "plots_2022"]
+            "spa_frac", "in_sac", "in_spa", "designation", "source", "plots_2022", "plots_2021"]
     import pandas as pd
     combined = gpd.GeoDataFrame(
         pd.concat([west[cols], sac[cols]], ignore_index=True), crs=west.crs)

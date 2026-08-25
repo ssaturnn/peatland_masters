@@ -60,3 +60,21 @@ def test_brightness_guard_rejects_cloud():
     inside = np.ones((1, 2), dtype=bool)
     mask = pipeline.ndvi_bare(stack, order, ndvi, valid, inside)
     assert mask.tolist() == [[True, False]]  # cloud pixel rejected as too bright
+
+
+def test_burn_scar_rejected_by_nbr():
+    import numpy as np
+    order = pipeline.BANDS
+    # both pixels low-NDVI and dark; one is cut peat (NIR>SWIR2 → NBR>0),
+    # the other a burn scar (NIR<SWIR2 → NBR<0)
+    peat = [800, 900, 1000, 1400, 1600, 1200]   # NBR=(0.14-0.12)/0.26>0
+    burn = [800, 900, 1000, 1100, 1600, 1500]   # NBR=(0.11-0.15)/0.26<0
+    stack = np.array([[peat, burn]], dtype="float32")
+    ndvi = np.array([[0.15, 0.05]])
+    nir = stack[:, :, order.index("nir")] / 10000.0
+    swir2 = stack[:, :, order.index("swir2")] / 10000.0
+    nbr = (nir - swir2) / (nir + swir2 + 1e-9)
+    assert nbr[0, 0] > 0 and nbr[0, 1] < 0  # fixture sanity
+    # the per-pixel guard used in gng_bare
+    keep = nbr > pipeline.BURN_NBR_FLOOR
+    assert keep.tolist() == [[True, False]]

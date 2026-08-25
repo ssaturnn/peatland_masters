@@ -330,7 +330,7 @@ function renderInsight() {
     <div class="ins-head">
       <span class="ins-big">${fmt(totalNew, 0)}<span class="ins-unit">ha</span></span>
       <span class="ins-cap">of new bare peat detected across
-        ${withCut.length} protected bogs, 2018 → 2024</span>
+        ${withCut.length} protected bogs, 2018 → 2026</span>
     </div>
     <div class="ins-row">
       <div class="ins-cell"><b>${FEATURES.length}</b><span>bogs analysed</span></div>

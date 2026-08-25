@@ -225,12 +225,21 @@ access to a clipped, per-site area estimate. See
 - [x] Preprocessing: per-AOI cloud check via the SCL band + a brightness guard
       so cloud/haze is not mistaken for bare peat
 - [x] NDVI-threshold baseline detector
-- [x] Growing Neural Gas clustering on multi-spectral pixel vectors
-- [x] Bare-peat label rule combining GNG clusters with a per-pixel NDVI criterion
+- [x] Growing Neural Gas detector over a 9-D standardized feature space
+      (6 bands + NDVI/MNDWI/NBR2): baseline sensitivity on real cut peat,
+      plus rejection of the false positives that defeat a pure vegetation
+      index — open water (MNDWI/SWIR), deep shadow, and burn scars (NBR)
 - [x] Polygon clip + area in hectares (cross-checked against the NPWS register)
-- [x] Multi-year change detection (2018→2024) — newly-bare, re-vegetated, rate/yr
-- [x] Batch pipeline across all 54 bogs with a per-site cache + GeoJSON export
-- [x] Interactive web map (ranking + per-bog card with year slider, GNG vs NDVI)
+- [x] Annual activity series 2018–2026, each year sampled in a fixed
+      cutting-season window (May–mid-July) as the maximum bare area over
+      all cloud-clear scenes (season-max, removes the acquisition-date
+      lottery a single scene suffers from)
+- [x] Change metrics — newly-bare, re-vegetated, cutting rate ha/yr
+- [x] Batch pipeline across 83 protected bogs (55 NHA + raised-bog SACs)
+      with a per-site cache + GeoJSON export
+- [x] External validation against NPWS enforcement records: the documented
+      most-cut bog (Monivea) reproduces its recorded activity profile
+- [x] Interactive web map (ranking + per-bog card with 9-year slider)
 - [x] Test suite + dataset-integrity validation (`docs/testing-and-validation.md`)
 
 ### To do

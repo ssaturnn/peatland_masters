@@ -100,3 +100,39 @@ def pick_clear_scene(provider, bbox_wgs84, date_range, out_shape,
         return None, None
     item = best.pop("_item")
     return item, best
+
+
+def clear_scenes(provider, bbox_wgs84, date_range, out_shape,
+                 aoi_mask=None, min_clear=0.85, max_cloud=60, limit=14,
+                 max_scenes=4):
+    """All scenes in the range that are clear over the AOI, best first.
+
+    Returns a list of (item, report) with aoi_clear >= min_clear, at most
+    `max_scenes`, ordered by acquisition date. Used for season-max
+    detection: bare cut peat is most visible right after cutting, so the
+    per-year figure is the maximum over every clear scene in the season,
+    which removes the acquisition-date lottery a single scene suffers from.
+    """
+    client = imagery.open_catalog(provider)
+    search = client.search(
+        collections=[imagery.PROVIDERS[provider]["collection"]],
+        bbox=bbox_wgs84,
+        datetime=date_range,
+        query={"eo:cloud_cover": {"lt": max_cloud}},
+        max_items=limit,
+    )
+    items = list(search.items())
+    items.sort(key=lambda it: it.properties.get("eo:cloud_cover", 100))
+
+    out = []
+    for it in items:
+        if len(out) >= max_scenes:
+            break
+        try:
+            rep = assess_scene(it, bbox_wgs84, provider, out_shape, aoi_mask)
+        except Exception:
+            continue
+        if rep["aoi_clear"] >= min_clear:
+            out.append((it, rep))
+    out.sort(key=lambda pair: pair[1]["datetime"])
+    return out
