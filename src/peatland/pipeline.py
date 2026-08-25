@@ -46,6 +46,13 @@ SWIR_WATER_FLOOR = 0.07    # below this a prototype is water / deep shadow
 # on our own data: real cut peat at Monivea NBR ≈ +0.09 (p10 +0.02), a burn
 # scar at Moorfield NBR ≈ −0.13. Pixels at or below the floor are burns.
 BURN_NBR_FLOOR = 0.0
+# Scene-level haze gate: the SCL badly under-reports broken cumulus (a scene
+# over Doogort East scored "88% clear" while visually solid cloud). Fraction
+# of AOI pixels brighter than 0.25 reflectance: measured 0.60 on that cloudy
+# scene vs <=0.005 on genuinely clear scenes. Scenes above the gate are
+# dropped from the season-max pool.
+HAZE_BRIGHT = 0.25
+HAZE_MAX_FRAC = 0.15
 
 
 def _year_range(year):
@@ -152,9 +159,12 @@ def detect_year(item, bbox, provider, shape, inside, scl):
     nir = stack[:, :, order.index("nir")]
     ndvi = detect.ndvi(red, nir)
     valid = preprocess.valid_mask(scl)
+    br = brightness(stack, order)
+    haze_frac = float(((br > HAZE_BRIGHT) & inside).sum() / max(inside.sum(), 1))
     ndvi_mask = ndvi_bare(stack, order, ndvi, valid, inside)
     gng_mask = gng_bare(stack, order, valid, inside)
-    return {"ndvi": ndvi_mask, "gng": gng_mask, "valid": valid}
+    return {"ndvi": ndvi_mask, "gng": gng_mask, "valid": valid,
+            "haze_frac": haze_frac}
 
 
 def _rate_ha_per_yr(years, areas):
@@ -205,6 +215,8 @@ def process_site(row, bbox, provider, years=YEARS):
         best = None
         for item, rep in scenes:
             d = detect_year(item, bbox, provider, shape, inside, rep["scl"])
+            if d["haze_frac"] > HAZE_MAX_FRAC:
+                continue  # broken cloud the SCL missed — unusable scene
             g = geo.mask_area_ha(d["gng"], transform)
             if best is None or g > best["gng_ha"]:
                 best = {
@@ -216,6 +228,8 @@ def process_site(row, bbox, provider, years=YEARS):
                     "_masks": d,
                 }
         per_year[yr] = best
+        if best is None:
+            continue  # every scene in the window was hazy
         if masks_first is None:
             masks_first = (yr, best["_masks"], inside)
         masks_last = (yr, best["_masks"], inside)
