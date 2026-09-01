@@ -160,7 +160,7 @@ function badges(desig) {
 /* ---- expanding bog card ------------------------------------------------- */
 const GNG_C = "#2880ff", NDVI_C = "#ff4d4d";
 let cardP = null, yearIdx = 0, frontId = "card-img-a", aspectSet = false;
-let playTimer = null;
+let playTimer = null, showOverlay = true;
 
 const $ = (id) => document.getElementById(id);
 
@@ -220,8 +220,17 @@ function showYear(idx) {
   };
   back.onerror = () => { noimg.classList.remove("hidden"); };
   noimg.classList.add("hidden");
-  back.src = `data/tiles/${p.code}_${y}.jpg`;
+  back.src = `data/tiles/${p.code}_${y}${showOverlay ? "" : "c"}.jpg`;
   updateYearUI();
+}
+
+function toggleOverlay() {
+  showOverlay = !showOverlay;
+  const b = $("ovl-btn");
+  b.textContent = `Overlays: ${showOverlay ? "on" : "off"}`;
+  b.classList.toggle("ovl-on", showOverlay);
+  $("card-legend").style.visibility = showOverlay ? "visible" : "hidden";
+  showYear(yearIdx);
 }
 
 function stopPlay() {
@@ -296,6 +305,7 @@ function closeCard() {
 
 $("year-range").addEventListener("input", (e) => { stopPlay(); showYear(+e.target.value); });
 $("play-btn").addEventListener("click", togglePlay);
+$("ovl-btn").addEventListener("click", toggleOverlay);
 $("card-close").addEventListener("click", closeCard);
 $("card-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "card-backdrop") closeCard();

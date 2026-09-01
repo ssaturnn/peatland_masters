@@ -38,10 +38,23 @@ def natural_rgb(stack, order):
     return np.clip(np.dstack([r, g, b]) * 3.2, 0, 1) ** (1.0 / 1.4)
 
 
-def render(rgb, gng_mask, ndvi_mask, inside, out_path):
+def render(rgb, gng_mask, ndvi_mask, inside, out_path, clean_path=None):
+    """Save the overlay tile and, optionally, a clean-RGB twin (no
+    markings) so the card can toggle overlays off to inspect the raw
+    surface beneath the detections."""
     h, w = rgb.shape[:2]
     scale = MAXPX / max(h, w)
     fig_w, fig_h = w * scale / 100, h * scale / 100
+
+    if clean_path is not None:
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=100)
+        ax.imshow(rgb)
+        ax.set_axis_off()
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        fig.savefig(clean_path, dpi=100, pad_inches=0,
+                    pil_kwargs={"quality": 82, "optimize": True})
+        plt.close(fig)
+
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=100)
     ax.imshow(rgb)
     # GNG: translucent blue fill
@@ -87,7 +100,8 @@ def process_site(row, bbox):
     made = 0
     for yr in YEARS:
         out = OUT_DIR / f"{row['SITECODE']}_{yr}.jpg"
-        if out.exists():
+        clean = OUT_DIR / f"{row['SITECODE']}_{yr}c.jpg"
+        if out.exists() and clean.exists():
             continue
         # render the exact scene the dataset chose for this year, so the
         # image matches the reported number; fall back to clearest-in-window
@@ -123,7 +137,7 @@ def process_site(row, bbox):
         gray = rgb.mean(axis=2)
         if (gray[inside] > 0.75).mean() > 0.18:
             continue
-        render(rgb, gng_mask, ndvi_mask, inside, out)
+        render(rgb, gng_mask, ndvi_mask, inside, out, clean_path=clean)
         made += 1
     return made
 

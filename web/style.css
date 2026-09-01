@@ -220,6 +220,13 @@ select { flex: 1; background: var(--panel); color: var(--ink);
 .card-legend .sw { width: 12px; height: 10px; border-radius: 2px; }
 .sw-gng { background: rgba(40, 128, 255, 0.9); }
 .sw-ndvi { background: transparent; border: 1.5px solid #ff4d4d; }
+#ovl-btn { position: absolute; right: 10px; bottom: 10px; z-index: 2;
+  border: 1px solid rgba(255,255,255,0.35); border-radius: 999px;
+  background: rgba(6,18,14,0.55); color: #cfe3d8; font-size: 11px;
+  padding: 5px 11px; cursor: pointer; backdrop-filter: blur(6px);
+  transition: background 0.15s, color 0.15s; }
+#ovl-btn.ovl-on { color: #fff; border-color: rgba(75,216,160,0.6); }
+#ovl-btn:hover { background: rgba(6,18,14,0.8); }
 .year-pill { position: absolute; left: 10px; bottom: 10px; z-index: 2;
   font-size: 20px; font-weight: 700; color: #fff; letter-spacing: 0.02em;
   padding: 3px 12px; border-radius: 999px; background: rgba(6, 18, 14, 0.55);
