@@ -19,29 +19,24 @@ const map = new maplibregl.Map({
   style: {
     version: 8,
     sources: {
-      carto: {
+      esri: {
         type: "raster",
-        tiles: [
-          "https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png",
-          "https://b.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png",
-          "https://c.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png",
-        ],
+        tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"],
         tileSize: 256,
-        attribution: "© OpenStreetMap contributors © CARTO",
+        attribution: "Esri, HERE, Garmin © OpenStreetMap contributors",
       },
-      cartoLabels: {
+      esriRef: {
         type: "raster",
-        tiles: [
-          "https://a.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png",
-          "https://b.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}.png",
-        ],
-        tileSize: 256, attribution: "© CARTO",
+        tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256, attribution: "Esri",
       },
     },
     layers: [
       { id: "bg", type: "background", paint: { "background-color": "#eef2ee" } },
-      { id: "carto", type: "raster", source: "carto",
-        paint: { "raster-opacity": 0.55, "raster-saturation": -0.55 } },
+      { id: "esri", type: "raster", source: "esri",
+        paint: { "raster-opacity": 0.9 } },
+      { id: "esri-ref", type: "raster", source: "esriRef",
+        paint: { "raster-opacity": 0.75 } },
     ],
   },
   center: [-8.75, 53.55], zoom: 7.6,
@@ -259,9 +254,15 @@ function statTiles(p) {
   const one = (k, v, u) =>
     `<div class="tile-stat"><div class="k">${k}</div>
       <div class="vs"><span class="vg">${v}</span><span class="u">${u}</span></div></div>`;
+  const trend = p.mk_trend === "increasing"
+    ? `<span style="color:${NDVI_C}">▲ rising</span>`
+    : p.mk_trend === "decreasing"
+      ? `<span style="color:${GNG_C}">▼ falling</span>` : "— none";
+  const trendU = p.mk_trend && p.mk_trend !== "none"
+    ? `Mann–Kendall z=${fmt(p.mk_z, 1)}, p=${fmt(p.mk_p, 3)}` : "not significant";
   return pair(`New cutting ${p.span}`, fmt(p.newly_gng_ha), fmt(p.newly_ndvi_ha)) +
+    one("Statistical trend", trend, trendU) +
     pair("Cutting rate ha/yr", fmt(p.rate_gng_ha_yr, 2), fmt(p.rate_ndvi_ha_yr, 2)) +
-    pair("Re-vegetated ha", fmt(p.reveg_gng_ha), fmt(p.reveg_ndvi_ha)) +
     one("Cloud-clear both ends", fmt(p.both_cov_pct, 0) + "%", "");
 }
 
@@ -344,6 +345,9 @@ function renderInsight() {
     </div>
     <div class="ins-row">
       <div class="ins-cell"><b>${FEATURES.length}</b><span>bogs analysed</span></div>
+      <div class="ins-cell"><b>${FEATURES.filter((f) =>
+        f.properties.mk_trend === "increasing").length}</b>
+        <span>significant rising trend (p&lt;0.05)</span></div>
       <div class="ins-cell"><b>${withCut.length}</b><span>show new cutting</span></div>
       <div class="ins-cell"><b>${top ? fmt(top.properties.newly_gng_ha, 0) : "–"}</b>
         <span>ha worst site</span></div>
@@ -370,7 +374,9 @@ function renderRanking() {
         data-name="${r.p.name.replace(/"/g, "&quot;")}">
       <span class="rank-idx">${i + 1}</span>
       <div class="rank-body">
-        <div class="rank-name">${r.p.name.replace(" NHA", "")}</div>
+        <div class="rank-name">${r.p.mk_trend === "increasing"
+          ? '<span class="tr-up" title="statistically significant rising trend">▲</span> '
+          : ""}${r.p.name.replace(" NHA", "")}</div>
         <div class="rank-bar"><i style="width:${Math.max(3, 100 * r.v / max)}%;
           background:${colorFor(r.v)}"></i></div>
       </div>
@@ -477,7 +483,11 @@ dataPromise.then((fc) => {
     selectByName(hash, false);
 });
 
-map.on("load", async () => {
+function whenStyleReady(fn) {
+  if (map.isStyleLoaded()) { fn(); return; }
+  map.once("styledata", () => whenStyleReady(fn));
+}
+whenStyleReady(async () => {
   const fc = await dataPromise;
 
   // actual bog shapes — subtle fill, shown mostly on zoom-in for context
@@ -487,10 +497,6 @@ map.on("load", async () => {
       "fill-opacity": ["interpolate", ["linear"], ["zoom"], 8, 0.12, 12, 0.5] } });
   map.addLayer({ id: "sites-line", type: "line", source: "sites",
     paint: { "line-color": "#2b5a49", "line-width": 0.7, "line-opacity": 0.55 } });
-
-  // place labels on top of the muted basemap, kept light
-  map.addLayer({ id: "labels", type: "raster", source: "cartoLabels",
-    paint: { "raster-opacity": 0.85 } });
 
   // proportional symbols — the primary, always-legible layer
   map.addSource("points", { type: "geojson", data: pointsFC() });
