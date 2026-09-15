@@ -1,8 +1,8 @@
 /* ---- config ------------------------------------------------------------ */
 const METRICS = {
-  new:  { label: "New cutting", unit: "ha",    prop: (m) => `newly_${m}_ha`,
+  new:  { label: "Newly bare", unit: "ha",    prop: (m) => `newly_${m}_ha`,
           stops: [0.01, 2, 5] },
-  rate: { label: "Cutting rate", unit: "ha/yr", prop: (m) => `rate_${m}_ha_yr`,
+  rate: { label: "Bare-area trend", unit: "ha/yr", prop: (m) => `rate_${m}_ha_yr`,
           stops: [0.05, 0.5, 1.5] },
   pct:  { label: "% bare now",   unit: "%",     prop: (m) => `pct_${m}`,
           stops: [0.5, 2, 5] },
@@ -12,6 +12,12 @@ const COLORS = ["#357a5f", "#f2d16b", "#ef8a3c", "#e04a34"];
 const state = { method: "gng", metric: "new", desig: "", county: "" };
 let FEATURES = [];
 let selectedName = null;
+
+// /private/ serves this same page behind a password and adds same-day
+// PlanetScope 3 m imagery (research licence: never on the public site).
+const PRIVATE = location.pathname.startsWith("/private");
+let PLANET = {}, PLANET_CITE = "";
+const psKey = (p, y) => `${p.code}_${y}`;
 
 /* ---- map ---------------------------------------------------------------- */
 const map = new maplibregl.Map({
@@ -155,7 +161,7 @@ function badges(desig) {
 /* ---- expanding bog card ------------------------------------------------- */
 const GNG_C = "#2880ff", NDVI_C = "#ff4d4d";
 let cardP = null, yearIdx = 0, frontId = "card-img-a", aspectSet = false;
-let playTimer = null, showOverlay = true;
+let playTimer = null, showOverlay = true, showPS = true, swipePct = 50;
 
 const $ = (id) => document.getElementById(id);
 
@@ -191,10 +197,32 @@ function updateYearUI() {
   const g = p.gng_series[yearIdx], n = p.ndvi_series[yearIdx];
   $("year-pill").textContent = y;
   $("card-year-read").innerHTML =
-    `Bare peat in ${y}: <b style="color:${GNG_C}">GNG ${fmt(g)}</b> ·
+    `Candidate bare peat in ${y}: <b style="color:${GNG_C}">GNG ${fmt(g)}</b> ·
      <b style="color:${NDVI_C}">NDVI ${fmt(n)}</b> ha`;
   $("card-spark").innerHTML =
     twoLineSpark(p.years, p.gng_series, p.ndvi_series, yearIdx);
+  if (p.dates && p.dates[yearIdx]) {
+    const date = document.createElement("div");
+    date.textContent = `Satellite acquisition: ${p.dates[yearIdx]}`;
+    $("card-year-read").appendChild(date);
+  }
+  const ps = PLANET[psKey(p, y)];
+  if (ps) {
+    const line = document.createElement("div");
+    line.className = "ps-read";
+    line.textContent = `PlanetScope 3 m: ${ps.date}` +
+      (ps.delta_days ? ` (${ps.delta_days} d from Sentinel-2)` : " (same day)") +
+      (ps.clear_pct != null ? ` · ${Math.round(ps.clear_pct)}% of the bog clear` : "") +
+      ` · ${ps.instruments.join(", ")}`;
+    line.classList.toggle("ps-warn", ps.clear_pct != null && ps.clear_pct < 90);
+    $("card-year-read").appendChild(line);
+    if (showPS) {
+      const cite = document.createElement("div");
+      cite.className = "ps-cite";
+      cite.textContent = `Imagery: ${PLANET_CITE}`;
+      $("card-year-read").appendChild(cite);
+    }
+  }
 }
 
 function showYear(idx) {
@@ -216,8 +244,59 @@ function showYear(idx) {
   back.onerror = () => { noimg.classList.remove("hidden"); };
   noimg.classList.add("hidden");
   back.src = `data/tiles/${p.code}_${y}${showOverlay ? "" : "c"}.jpg`;
+  updatePS();
   updateYearUI();
 }
+
+/* ---- PlanetScope swipe (private view only) ------------------------------ */
+function updatePS() {
+  const key = psKey(cardP, cardP.years[yearIdx]), ps = PLANET[key];
+  const on = !!ps && showPS;
+  const btn = $("ps-btn"), img = $("card-img-ps");
+  btn.classList.toggle("hidden", !ps);
+  btn.classList.toggle("ovl-on", on);
+  btn.textContent = on ? "PlanetScope 3 m: on" : "PlanetScope 3 m: off";
+  if (on) {
+    img.src = `/private/planet/${key}_ps${showOverlay ? "" : "c"}.jpg`;
+    setSwipe(swipePct);
+  }
+  img.classList.toggle("show", on);
+  $("swipe").classList.toggle("hidden", !on);
+  stackEl.classList.toggle("comparing", on);
+  $("card-legend").innerHTML = `<span><i class="sw sw-gng"></i>GNG</span>
+    <span><i class="sw sw-ndvi"></i>NDVI</span>` +
+    (on && ps.candidates ? `<span><i class="sw sw-ps"></i>3 m candidates</span>` : "");
+}
+
+function setSwipe(pct) {
+  swipePct = Math.max(0, Math.min(100, pct));
+  $("card-img-ps").style.clipPath = `inset(0 0 0 ${swipePct}%)`;
+  $("swipe").style.left = `${swipePct}%`;
+  $("swipe").setAttribute("aria-valuenow", String(Math.round(swipePct)));
+}
+
+// drag anywhere on the image: Sentinel-2 left of the line, PlanetScope right
+const stackEl = document.querySelector(".img-stack");
+let swiping = false;
+const swipeTo = (e) => {
+  const r = stackEl.getBoundingClientRect();
+  setSwipe(100 * (e.clientX - r.left) / r.width);
+};
+stackEl.addEventListener("pointerdown", (e) => {
+  if (!stackEl.classList.contains("comparing")) return;
+  swiping = true; stackEl.setPointerCapture(e.pointerId); swipeTo(e);
+});
+stackEl.addEventListener("pointermove", (e) => { if (swiping) swipeTo(e); });
+["pointerup", "pointercancel"].forEach((t) =>
+  stackEl.addEventListener(t, () => { swiping = false; }));
+$("swipe").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  e.preventDefault();
+  setSwipe(swipePct + (e.key === "ArrowLeft" ? -5 : 5));
+});
+$("ps-btn").addEventListener("click", () => {
+  showPS = !showPS; updatePS(); updateYearUI();
+});
 
 function toggleOverlay() {
   showOverlay = !showOverlay;
@@ -254,16 +333,19 @@ function statTiles(p) {
   const one = (k, v, u) =>
     `<div class="tile-stat"><div class="k">${k}</div>
       <div class="vs"><span class="vg">${v}</span><span class="u">${u}</span></div></div>`;
-  const trend = p.mk_trend === "increasing"
+  const trend = !p.mk_trend ? "Not assessed" : p.mk_trend === "increasing"
     ? `<span style="color:${NDVI_C}">▲ rising</span>`
     : p.mk_trend === "decreasing"
       ? `<span style="color:${GNG_C}">▼ falling</span>` : "— none";
-  const trendU = p.mk_trend && p.mk_trend !== "none"
+  const trendU = !p.mk_trend ? "No test result in this dataset" : p.mk_trend !== "none"
     ? `Mann–Kendall z=${fmt(p.mk_z, 1)}, p=${fmt(p.mk_p, 3)}` : "not significant";
-  return pair(`New cutting ${p.span}`, fmt(p.newly_gng_ha), fmt(p.newly_ndvi_ha)) +
+  return pair(`Newly bare ${p.span}`, fmt(p.newly_gng_ha), fmt(p.newly_ndvi_ha)) +
     one("Statistical trend", trend, trendU) +
-    pair("Cutting rate ha/yr", fmt(p.rate_gng_ha_yr, 2), fmt(p.rate_ndvi_ha_yr, 2)) +
-    one("Cloud-clear both ends", fmt(p.both_cov_pct, 0) + "%", "");
+    pair("Bare-area trend ha/yr", fmt(p.rate_gng_ha_yr, 2), fmt(p.rate_ndvi_ha_yr, 2)) +
+    one("Cloud-clear both ends", fmt(p.both_cov_pct, 0) + "%", "") +
+    (p.water_excl_pct > 5
+      ? one("Water excluded", fmt(p.water_excl_pct, 0) + "%", "open or tidal water on a clear scene")
+      : "");
 }
 
 function openCard(p) {
@@ -285,8 +367,8 @@ function openCard(p) {
     vd.classList.remove("hidden");
     vd.innerHTML = `<span class="vd-icon">✓</span>
       <span><b>NPWS-documented hotspot.</b> ${p.plots_2022} turf plots were
-      officially recorded as cut here in 2022 — our detector independently
-      flags ${fmt(p.newly_gng_ha)} ha of new bare peat, without any labels.</span>`;
+      recorded here in 2022. The satellite result is ${fmt(p.newly_gng_ha)} ha
+      newly bare over ${p.span}. Plot counts and this area measure are not directly comparable.</span>`;
   } else {
     vd.classList.add("hidden"); vd.innerHTML = "";
   }
@@ -326,11 +408,13 @@ function renderInsight() {
     b.properties.newly_gng_ha - a.properties.newly_gng_ha)[0];
   const hs = FEATURES.filter((f) => f.properties.plots_2022 != null
     && f.properties.newly_gng_ha > 0.5);
+  const nUp = FEATURES.filter((f) => f.properties.mk_trend === "increasing").length;
+  const nDown = FEATURES.filter((f) => f.properties.mk_trend === "decreasing").length;
 
   const valid = hs.length
     ? `<div class="ins-valid">
-         <div class="ins-valid-hd">✓ Cross-checked against NPWS records</div>
-         <div class="ins-valid-body">The detector independently flags
+         <div class="ins-valid-hd">Sites with documented cutting</div>
+         <div class="ins-valid-body">Candidate change overlaps
            ${hs.length} of the government-documented turf-cutting hotspots —
            ${hs.slice(0, 3).map((f) => f.properties.name.replace(/ (Bog )?SAC.*/, ""))
              .join(", ")} — where cutting was officially recorded.</div>
@@ -340,17 +424,17 @@ function renderInsight() {
   document.getElementById("insight").innerHTML = `
     <div class="ins-head">
       <span class="ins-big">${fmt(totalNew, 0)}<span class="ins-unit">ha</span></span>
-      <span class="ins-cap">of new bare peat detected across
-        ${withCut.length} protected bogs, 2018 → 2026</span>
+      <span class="ins-cap">of newly bare candidate surface across
+        ${FEATURES.length} protected bogs, first vs last clear survey year</span>
     </div>
     <div class="ins-row">
       <div class="ins-cell"><b>${FEATURES.length}</b><span>bogs analysed</span></div>
-      <div class="ins-cell"><b>${FEATURES.filter((f) =>
-        f.properties.mk_trend === "increasing").length}</b>
-        <span>significant rising trend (p&lt;0.05)</span></div>
-      <div class="ins-cell"><b>${withCut.length}</b><span>show new cutting</span></div>
+      <div class="ins-cell"><b>${nDown}<i class="tr-down">▼</i>
+        · ${nUp}<i class="tr-up">▲</i></b>
+        <span>significant falling · rising trend (p&lt;0.05)</span></div>
+      <div class="ins-cell"><b>${withCut.length}</b><span>have >0.5 ha newly bare</span></div>
       <div class="ins-cell"><b>${top ? fmt(top.properties.newly_gng_ha, 0) : "–"}</b>
-        <span>ha worst site</span></div>
+        <span>ha largest candidate change</span></div>
     </div>
     ${valid}
     <div class="ins-ctx">Up to 90% of Irish peatlands are degraded; they hold
@@ -376,7 +460,9 @@ function renderRanking() {
       <div class="rank-body">
         <div class="rank-name">${r.p.mk_trend === "increasing"
           ? '<span class="tr-up" title="statistically significant rising trend">▲</span> '
-          : ""}${r.p.name.replace(" NHA", "")}</div>
+          : r.p.mk_trend === "decreasing"
+            ? '<span class="tr-down" title="statistically significant falling trend">▼</span> '
+            : ""}${r.p.name.replace(" NHA", "")}</div>
         <div class="rank-bar"><i style="width:${Math.max(3, 100 * r.v / max)}%;
           background:${colorFor(r.v)}"></i></div>
       </div>
@@ -404,7 +490,7 @@ function selectByName(name, fly) {
   const f = FEATURES.find((x) => x.properties.name === name);
   if (!f) return;
   if (history.replaceState)
-    history.replaceState(null, "", "#" + encodeURIComponent(name));
+    history.replaceState(null, "", location.pathname + "#" + encodeURIComponent(name));
   openCard(f.properties);
   if (map.getLayer("bog-sel"))
     map.setFilter("bog-sel", ["==", ["get", "name"], name]);
@@ -464,9 +550,61 @@ document.getElementById("filter-county").addEventListener("change", (e) => {
 /* ---- load --------------------------------------------------------------- */
 // Fetch data once; render the sidebar as soon as it arrives, independent of
 // the map's WebGL init, so ranking/detail work even if the map is slow.
-const dataPromise = fetch("data/sites.geojson").then((r) => r.json());
+const dataPromise = fetch("data/sites.geojson")
+  .then((r) => {
+    if (!r.ok) throw new Error(`Dataset HTTP ${r.status}`);
+    return r.json();
+  })
+  .then((fc) => {
+    if (fc.type !== "FeatureCollection" || !Array.isArray(fc.features))
+      throw new Error("Invalid map dataset");
+    return fc;
+  })
+  .catch(() => {
+    $("coverage").textContent = "· data unavailable";
+    $("insight").textContent = "The results could not be loaded. Please reload the page.";
+    return null;
+  });
 
-dataPromise.then((fc) => {
+/* ---- PlanetScope list (private view) ------------------------------------ */
+function renderPlanetList() {
+  const rows = Object.entries(PLANET).map(([key, ps]) => {
+    const [code, year] = key.split("_");
+    const f = FEATURES.find((x) => x.properties.code === code);
+    return f && { name: f.properties.name, year: Number(year), ps };
+  }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+  if (!rows.length) return;
+  const evalRows = rows.filter((r) => r.ps.source !== "release");
+  const bogs = new Set(rows.map((r) => r.name)).size;
+  $("planet").innerHTML = `<h2>PlanetScope 3 m <span>· within 3 days of Sentinel-2</span></h2>
+    <p class="ps-hint">In the bog card for ${rows.length} bog-years on ${bogs} bogs,
+      mostly the latest year. Drag across the image to compare 10 m with 3 m.</p>
+    <div class="ps-sub">Evaluation site-years</div>
+    <ul>${evalRows.map((r) => `<li><button class="ps-item"
+        data-name="${r.name.replace(/"/g, "&quot;")}" data-year="${r.year}">
+        <span>${r.name.replace(/ (SAC|NHA)$/, "")}</span>
+        <span class="ps-date">${r.ps.date}</span></button></li>`).join("")}</ul>`;
+  $("planet").classList.remove("hidden");
+  $("planet").querySelectorAll(".ps-item").forEach((b) => b.addEventListener("click", () => {
+    showPS = true;
+    selectByName(b.dataset.name, true);
+    const i = cardP.years.indexOf(Number(b.dataset.year));
+    if (i >= 0 && i !== yearIdx) showYear(i);
+  }));
+}
+
+if (PRIVATE) {
+  $("private-note").classList.remove("hidden");
+  $("private-link").innerHTML =
+    `<a href="/private/briefing/">Research briefing</a> · <a href="/">Public map</a>`;
+}
+const planetPromise = PRIVATE
+  ? fetch("/private/planet/manifest.json")
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  : Promise.resolve(null);
+
+Promise.all([dataPromise, planetPromise]).then(([fc, planet]) => {
+  if (!fc) return;
   FEATURES = fc.features;
   FEATURES.forEach((f) => {
     const p = f.properties, s = p.site_ha || 1;
@@ -477,18 +615,29 @@ dataPromise.then((fc) => {
   renderInsight();
   renderRanking();
   renderLegend();
-  // deep-link: #Site%20Name selects a bog on load (shareable)
-  const hash = decodeURIComponent(location.hash.replace(/^#/, ""));
-  if (hash && FEATURES.some((f) => f.properties.name === hash))
+  if (planet && planet.tiles) {
+    PLANET = planet.tiles; PLANET_CITE = planet.citation || "";
+    renderPlanetList();
+  }
+  // deep-link: #Site%20Name selects a bog on load (shareable);
+  // #Site%20Name|2022 also opens that year
+  const [hash, year] = decodeURIComponent(location.hash.replace(/^#/, "")).split("|");
+  if (hash && FEATURES.some((f) => f.properties.name === hash)) {
     selectByName(hash, false);
+    const i = cardP.years.indexOf(Number(year));
+    if (i >= 0 && i !== yearIdx) showYear(i);
+  }
 });
 
 function whenStyleReady(fn) {
   if (map.isStyleLoaded()) { fn(); return; }
-  map.once("styledata", () => whenStyleReady(fn));
+  // styledata may fire before raster sources finish, with no later styledata
+  // event. The load event reliably releases the overlay initialization.
+  map.once("load", fn);
 }
 whenStyleReady(async () => {
   const fc = await dataPromise;
+  if (!fc) return;
 
   // actual bog shapes — subtle fill, shown mostly on zoom-in for context
   map.addSource("sites", { type: "geojson", data: fc });

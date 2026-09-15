@@ -1,5 +1,14 @@
 # Testing and validation
 
+**9 September 2026:** earlier numerical examples below describe historical,
+uncorrected detector versions and must not be reused as current accuracy results.
+The Sentinel-2 baseline offset was missing from the reader. See
+[the final-month plan and controlled radiometry check](completion-plan.md).
+The current tests cover harmonization, valid-AOI clustering, shared baselines,
+bounded GNG prediction and reference-label scoring. Release validation can require
+matching image provenance and the current detector version. Independent accuracy
+labels are still required.
+
 How correctness is checked at each level — from pure functions up to the
 scientific claim that a detected patch is really cut peat.
 
@@ -98,6 +107,17 @@ window — the peak visible extraction state, robust to single-date timing.
 Residual caveat: a year whose only clear scenes fall late in the window
 (e.g. Monivea 2023, June-only) can still under-report.
 
+**Scene timing across years (v3 release check, September 2026).** On the
+raised bogs, the large early values of the series come mostly from April and
+early-May scenes; Sonnagh, for example, reads 75 ha on 21 April 2018 and 53 ha
+on 25 April 2021. From 2023, most clear scenes fall between mid-May and June,
+when the same bogs read near zero. The ten significant falling trends are
+therefore partly confounded with acquisition timing.
+
+Some of the decline appears real. On the 24 April 2024 scene, Callow and
+Cloonchambers read 0.7 and 1.2 ha, against 2.6–8.4 ha in April 2020–2022. The
+two-date check in `docs/multitemporal-gng.md` targets this ambiguity directly.
+
 ## 3c. Longitudinal validation on the most-cut bog on record
 
 Monivea Bog SAC is the State's most-documented cutting site (70 banks cut
@@ -133,6 +153,178 @@ that defeat a pure NDVI threshold — open water (Rosroe), deep shadow, and
 burn scars (Moorfield) — while keeping the baseline's sensitivity on real
 cut surfaces (Monivea: 37.3 of 40.4 ha retained). Figures:
 `outputs/rosroe_demo.png`, `outputs/moorfield_burn_demo.png`.
+
+## 3e. Blanket-bog phenology (QA finding → adaptive contrast threshold)
+
+Visual QA of the Atlantic blanket bogs (Achill, Erris, Connemara) exposed
+the last big false-positive class: their vegetation — Molinia and Calluna —
+stays winter-brown well into May, so on an early-season scene most of the
+bog sits just under the fixed NDVI threshold with **no peat exposed at
+all**. Doogort East Bog 2023 was the worst case: 223 ha "detected" on a
+31 May scene, visually just a uniformly brown bog.
+
+The fix follows from what fresh cutting actually is: an **anomaly against
+the bog's own vegetated matrix**, not an absolute reflectance class. The
+detector now caps its threshold at (p75 NDVI over the bog − 0.18) per
+scene. On a green scene (matrix ≈ 0.6) the cap is inactive and the fixed
+0.25 applies; on a senescent scene (matrix ≈ 0.35) it tightens to ≈ 0.17,
+rejecting the in-distribution brown while keeping genuinely dark fresh
+peat (NDVI ≈ 0.10). Control results (`scripts/17_control_cases.py`):
+
+| Control case | Before | After | Truth |
+|---|---|---|---|
+| Doogort East 2023 (brown blanket bog) | 223.4 ha | 19.0 ha | no visible cutting |
+| Moorfield 2025 (burn scar)            | 4.0 ha   | 3.0 ha  | burn, not cutting |
+| Monivea 2021 (51 documented plots)    | 2.2 ha   | 3.3 ha  | documented cutting |
+
+The NDVI baseline on the same Doogort scene still reports 224 ha — the
+clearest demonstration yet of why the thesis method is needed. Two
+consequences are accepted and recorded rather than hidden: (i) a year
+whose only clear scenes are senescent can under-report (the per-year
+`matrix_series` value marks such low-contrast years); (ii) documented
+raised-bog hotspots measured only on brown May scenes (Monivea 2022)
+lose most of their previously reported area — the earlier figures were
+themselves partly phenology inflation, and the register plot counts
+(tens of small cut banks) are more consistent with the new, smaller
+areas than with 40 ha.
+
+Supporting changes in the same pass: geometric **cloud-shadow
+projection** (cloud pixels projected along the anti-solar azimuth for
+400–2000 m cloud heights; dark-NIR pixels under the projection are
+masked — SCL's own shadow class badly under-detects), a **month-spread
+scene pool** (the clearest scene of each month enters the season-max
+pool first, so a wide window cannot fill the pool with same-month
+duplicates), per-day scene de-duplication, and an earlier **15 April
+season start for raised bogs** (their cutting season opens in April;
+blanket bogs keep the 1 May start because of the phenology above).
+
+## 3f. Intertidal flats (QA finding → ever-water exclusion)
+
+After the radiometry correction, visual QA of the largest remaining
+detection — Tullaghan Bay And Bog NHA, a coastal estuary complex —
+showed the mask sitting on the bay's **tidal mudflats**, not on peat.
+At low tide an exposed flat is dark wet sediment: low NDVI, low
+brightness, moisture-bearing — spectrally indistinguishable from fresh
+bare peat in a single scene. The year series (390 → 99 → 486 ha)
+tracked the tide state at acquisition, not extraction.
+
+The multi-temporal record disambiguates what a single scene cannot: a
+tidal pixel is open water (SCL class 6) on *some* clear scene. The
+pipeline now unions SCL water across every clear scene of a site and
+excludes those pixels from detection in all years (`ever_water_mask`,
+covered by unit tests; the exclusion is stored with the site record so
+rendered images use exactly the masks the numbers used). Tullaghan Bay
+drops from 490 ha to 23–44 ha across the series, and the year-to-year
+swing no longer tracks the tide. Visual QA of the corrected tiles shows
+the residual is mixed: some patches on the bog margins, but also a thin
+fringe along the shoreline — upper-intertidal pixels that were never
+under water on any clear acquisition, so the union cannot catch them.
+A 1–2 pixel buffer around the ever-water mask is the next refinement;
+until then Tullaghan Bay's figure is an upper bound, not a cutting
+estimate.
+
+## 3g. Broken cumulus and haze fields (QA finding → v3 cloud screen)
+
+Building the blind reference sample exposed the last large error source. A
+contact sheet of the eight frozen evaluation scenes showed cloud directly on
+sampled points in four of them — popcorn cumulus over Ederglen 2018,
+isolated cumulus over Doogort East 2023 and Cloonchambers 2022, and a haze
+field with parallax colour fringes over Moorfield 2025 — although every one
+had passed the quality gates (SCL clear fraction 0.87–0.99, bright-haze
+fraction ≤ 0.04). There are two causes. The SCL misses small cumulus, and
+the brightness haze gate had been calibrated on offset-inflated reflectance,
+so after the harmonisation it lets cloud fields through. On top of that,
+the season-max rule preferentially *selects* such scenes, because cloud
+edges add low-NDVI pixels.
+
+Detector v3 adds two screens. They were calibrated on the cloud-affected
+calibration scenes only (Doogort East 2023, Moorfield 2025) and then
+checked on the rest:
+
+- **per pixel:** blue reflectance > 0.16 is cloud (bog surfaces sit at
+  0.03–0.10). The mask is dilated by 3 pixels (30 m) to remove the darker,
+  parallax-shifted cloud edges, and it also seeds the shadow projection;
+- **per scene:** a HOT-style haze index (blue − 0.5·red, after Zhang et
+  al., 2002). A scene where more than 15 % of the bog exceeds 0.02 is
+  dropped: 0.57 on the hazy Moorfield scene vs ≤ 0.063 on usable scenes.
+
+Share of GNG-detected pixels removed by the pixel screen on the frozen
+scenes:
+
+| Scene | Role | Sky | Effect |
+|---|---|---|---|
+| Doogort East 2023 | calibration | cumulus | 99 % removed |
+| Moorfield 2025 | calibration | haze field | scene rejected (HOT 0.57) |
+| Monivea 2022 | calibration | clear | 0 % removed |
+| Tullaghan Bay 2026 | calibration | clear | 20 % removed |
+| Ederglen 2018 | held-out | popcorn cumulus | scene rejected (HOT 0.60) |
+| Cloonchambers 2022 | held-out | one cumulus | 16 % removed |
+| Corliskea 2021 | held-out | clear | 12 % removed |
+| Moycullen 2018 | held-out | clear | 13 % removed |
+
+So the Doogort East 2023 detection that survived the phenology fix
+(10.7 ha) was almost entirely cloud. The control run
+(`scripts/17_control_cases.py`) confirms it end to end. Doogort East
+2023's cumulus scene is now gated and its season maximum falls to
+0.5 ha. The documented hotspots hold: Monivea 3.3 ha (2021) and 4.3 ha
+(2022), Callow 2.6 ha (2022). The Moorfield 2025 burn stays at 0 ha for
+GNG, while the NDVI baseline still reports 2.0 ha of burn. Hazy scenes
+that the HOT gate now drops include some June acquisitions, so a few
+summer-only years may lose their observation; that is conservative
+(no false detections), but it reduces coverage. On clear scenes the screen removes
+0–20 % of detections, all among the brightest detected surfaces. Whether
+those are sand, tracks or genuinely pale, dry peat is exactly what the
+labelled sample will show; losing some very dry peat is a recorded
+limitation.
+
+## 3h. Reference sample and labelling protocol
+
+Accuracy is assessed on a stratified random sample of pixels from frozen
+scenes. `scripts/12_method_comparison.py` freezes the exact scene the
+published release used for each site-year, on the release's grid and with
+its tidal exclusion. `scripts/13_sample_points.py --strata agreement` then
+draws three strata per site-year:
+
+- GNG-detected;
+- **disagreement** — GNG negative but NDVI, rules or K-means positive,
+  sampled directly because that is where the methods differ;
+- all-negative.
+
+Stratum populations and sample sizes are recorded, so population-weighted
+estimates are available (Olofsson et al., 2014). Site-years are split into
+calibration sites (used while tuning thresholds) and held-out sites (never
+inspected during tuning). Held-out accuracy is the headline figure.
+
+Labels are assigned blind with `scripts/18_label_tool.py`. For each point
+the annotator sees the Sentinel-2 acquisition in true colour and NIR false
+colour (330 m close-up and 1.2 km context), plus very-high-resolution
+imagery — never any detector output. Each 10 m pixel is labelled bare_peat,
+vegetated, water, burn, other or unsure, by its dominant cover on the
+acquisition date. False colour is the main test for brown areas:
+senescent vegetation usually stays red, bare peat does not. The exception
+is a drought year (2018): fully dead grass can turn beige in false colour
+too, so there the extent, texture and absence of cut-bank geometry decide.
+This exception was added to the guide after the first five labels. The
+evidence used and
+free-text notes are stored with every label, and unsure points are left out
+of the metrics.
+
+Date-matched reference: for six of the eight site-years, PlanetScope 3 m
+surface-reflectance frames from the same day as the Sentinel-2 acquisition
+are shown next to the Sentinel-2 chips. They were ordered through Planet's
+Education and Research programme with `scripts/20_planet_reference.py`
+(Planet Team, 2026). Unlike the basemap imagery, they show the state on the
+date, at three times the resolution, which settles most bare-peat versus
+dry-grass cases. The two 2018 site-years (Moycullen, Ederglen) have no
+usable same-week PlanetScope frame. There the reference rests on the
+Sentinel-2 acquisition alone, supported by basemap context.
+
+Limitation: where PlanetScope is missing, the reference is visual
+interpretation of the same acquisition the detectors saw. It is
+independent of them in method, but not in data source.
+
+Planet Team (2026). Planet Application Program Interface: In Space for Life
+on Earth. San Francisco, CA. https://api.planet.com
 
 ## 4. Web app checks
 

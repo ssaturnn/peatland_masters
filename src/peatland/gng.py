@@ -151,14 +151,17 @@ class GrowingNeuralGas:
     # -- inference -------------------------------------------------------
     def predict(self, data):
         """Assign each row to its nearest node index."""
-        # chunked to keep memory bounded on large images
+        if self.weights is None:
+            raise ValueError("Fit the network before prediction")
+        # Pairwise distances avoid a (pixels, nodes, features) temporary.
+        # With 80 prototypes the old 100k-row broadcast exceeded 500 MB.
         out = np.empty(len(data), dtype="int32")
-        step = 100_000
+        step = 4096
+        weight_norm = np.sum(self.weights ** 2, axis=1)
         for i in range(0, len(data), step):
-            chunk = data[i:i + step]
-            d = np.sum(
-                (chunk[:, None, :] - self.weights[None, :, :]) ** 2, axis=2
-            )
+            chunk = np.asarray(data[i:i + step], dtype=np.float64)
+            d = (np.sum(chunk ** 2, axis=1)[:, None] + weight_norm[None, :]
+                 - 2.0 * chunk @ self.weights.T)
             out[i:i + step] = np.argmin(d, axis=1)
         return out
 

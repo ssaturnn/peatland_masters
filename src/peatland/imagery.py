@@ -9,6 +9,7 @@ downloaded.
 """
 
 import rasterio
+import numpy as np
 from rasterio.warp import transform_bounds
 from rasterio.windows import from_bounds
 from pystac_client import Client
@@ -54,7 +55,7 @@ def search_scene(provider, bbox_wgs84, date_range, max_cloud=20, limit=10):
     return items[0]
 
 
-def _asset_href(item, band, provider):
+def _band_asset(item, band, provider):
     """Resolve the asset key for a band name across provider conventions."""
     # Planetary Computer uses B02.., earth-search uses lowercase 'red' etc.
     candidates = [band, band.upper(), band.lower()]
@@ -66,8 +67,50 @@ def _asset_href(item, band, provider):
         candidates.append(name_map[band])
     for key in candidates:
         if key in item.assets:
-            return item.assets[key].href
+            return item.assets[key]
     raise KeyError(f"band {band!r} not in assets: {list(item.assets)[:12]}")
+
+
+def _asset_href(item, band, provider):
+    return _band_asset(item, band, provider).href
+
+
+def harmonize_band(array, item, band, provider):
+    """Return spectral values as reflectance * 10000; leave SCL unchanged.
+
+    Processing baseline >= 04.00 introduced BOA_ADD_OFFSET=-1000 DN.
+    Baseline metadata, rather than acquisition year, also covers reprocessed
+    historical scenes. Explicit STAC scale/offset takes precedence. Zero DN
+    denotes no-data and becomes NaN, excluded by the detector's validity mask.
+    Negative reflectance is clamped to zero for the existing detector contract.
+    """
+    band = config.S2_BANDS.get(band, band)
+    if band == "SCL":
+        return array
+    asset = _band_asset(item, band, provider)
+    raster_bands = asset.extra_fields.get("raster:bands", [])
+    meta = raster_bands[0] if raster_bands else {}
+    values = np.asarray(array, dtype=np.float32)
+    nodata = meta.get("nodata", 0)
+    invalid = ~np.isfinite(values) | (values == nodata)
+    if "scale" in meta and "offset" in meta:
+        result = (values * float(meta["scale"]) + float(meta["offset"])) * 10000.0
+    elif provider == "earthsearch" and item.properties.get("earthsearch:boa_offset_applied") is True:
+        result = values.copy()
+    else:
+        baseline = item.properties.get("s2:processing_baseline")
+        if baseline is None:
+            raise ValueError(f"Missing processing baseline for {item.id}: cannot harmonize {band}")
+        try:
+            baseline = float(baseline)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid processing baseline for {item.id}") from exc
+        if not np.isfinite(baseline):
+            raise ValueError(f"Invalid processing baseline for {item.id}")
+        result = values - (1000.0 if baseline >= 4.0 else 0.0)
+    result = np.maximum(result, 0.0).astype(np.float32)
+    result[invalid] = np.nan
+    return result
 
 
 def read_window(item, band, bbox_wgs84, provider, out_shape=None,
@@ -96,7 +139,7 @@ def read_window(item, band, bbox_wgs84, provider, out_shape=None,
             ) * rasterio.Affine.scale(
                 window.width / out_shape[1], window.height / out_shape[0]
             )
-        return arr, win_transform, src.crs
+        return harmonize_band(arr, item, band, provider), win_transform, src.crs
 
 
 def read_stack(item, bands, bbox_wgs84, provider):

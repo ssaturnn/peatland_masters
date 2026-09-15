@@ -124,6 +124,33 @@ def clear_scenes(provider, bbox_wgs84, date_range, out_shape,
     items = list(search.items())
     items.sort(key=lambda it: it.properties.get("eo:cloud_cover", 100))
 
+    # One item per acquisition DAY (keep the clearest): reprocessed
+    # baselines and overlapping tiles surface the same day twice, and a
+    # duplicate wastes a slot in the small season-max pool.
+    by_day = {}
+    for it in items:
+        day = it.properties.get("datetime", "")[:10]
+        if day not in by_day:
+            by_day[day] = it
+    items = list(by_day.values())
+    items.sort(key=lambda it: it.properties.get("eo:cloud_cover", 100))
+
+    # Month-spread candidate order: the clearest scene of EACH month first,
+    # then the rest by cloud cover. With a small max_scenes and a wide
+    # window, pure cloud-cover order can fill the whole pool from one
+    # calendar month; season-max needs a seasonal spread, because
+    # early-season scenes are senescent (little vegetation contrast) while
+    # the mid-summer scenes carry the clearest cutting signal.
+    seen, spread, rest = set(), [], []
+    for it in items:
+        month = it.properties.get("datetime", "")[:7]
+        if month not in seen:
+            seen.add(month)
+            spread.append(it)
+        else:
+            rest.append(it)
+    items = spread + rest
+
     out = []
     for it in items:
         if len(out) >= max_scenes:

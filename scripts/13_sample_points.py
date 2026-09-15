@@ -1,119 +1,104 @@
-"""Step 14 — stratified random points for the formal accuracy assessment.
+"""Sample frozen evaluation scenes without refetching imagery or changing predictions.
 
-Implements the sampling half of a Congalton & Green style accuracy
-assessment: for each selected site-year, draw random points stratified
-by detector output — 'detected' (GNG bare) and 'undetected' (inside the
-bog, not flagged) — and export them as CSV + GeoJSON with WGS84
-coordinates and the exact scene date.
-
-A human then labels each point by eye against high-resolution imagery
-(Tailte Éireann 25 cm ortho / PlanetScope 3 m / Google Earth), filling
-the `truth` column with bare_peat / vegetated / water / burn / unsure.
-scripts/14_score_points.py (next step) turns the labelled file into a
-confusion matrix with precision / recall / F1.
+Use --run with the directory produced by 12_method_comparison.py. Outputs
+accuracy_points.csv with predictions/design weights, a blind labels.csv for
+independent annotation, and locations.geojson. Existing labels are never
+replaced: each invocation requires a new output directory.
 """
 
-import sys
+import argparse
 import csv
+import hashlib
 import json
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-import warnings
-warnings.filterwarnings("ignore")
-
 import numpy as np
-import geopandas as gpd
 import rasterio.transform
+from pyproj import Transformer
 
-from peatland import boundaries, imagery, geo, config, preprocess, pipeline, detect
-
-SITES_YEARS = [  # (name fragment, year): active + quiet mix
-    ("Monivea", 2022), ("Namucka", 2026), ("Callow", 2026),
-    ("Kilnaborris", 2024), ("Derrinlough", 2024), ("Rosroe", 2018),
-]
-PER_STRATUM = 25          # points per stratum per site-year
-SEED = 42
-OUT_CSV = Path("outputs/accuracy_points.csv")
-OUT_GJ = Path("outputs/accuracy_points.geojson")
-
-
-def cache_date(code, year):
-    r = json.loads((config.OUT_DIR / "cache" / f"{code}.json").read_text())
-    for y, d in zip(r["years"], r["dates"]):
-        if y == year:
-            return d
-    return None
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from peatland import config
 
 
 def main():
-    sites = boundaries.build_sites()
-    rng = np.random.default_rng(SEED)
-    rows, feats_gj = [], []
-
-    for name, year in SITES_YEARS:
-        row = sites[sites.SITE_NAME.str.contains(name)].iloc[0]
-        day = cache_date(row["SITECODE"], year)
-        if day is None:
-            print(f"skip {name} {year}: no scene in cache"); continue
-        bbox = boundaries.site_bbox_wgs84(sites, row.name, buffer_m=200)
-        ref = imagery.search_scene("planetary", bbox, "2021-05-01/2021-09-15",
-                                   max_cloud=40)
-        red0, transform, crs = imagery.read_window(ref, "red", bbox, "planetary")
-        shape = red0.shape
-        geom = gpd.GeoSeries([row.geometry], crs=config.ITM).to_crs(crs).iloc[0]
-        inside = geo.polygon_mask(geom, shape, transform)
-        item, rep = preprocess.pick_clear_scene(
-            "planetary", bbox, f"{day}/{day}", shape, aoi_mask=inside, min_clear=0.5)
-        order = list(pipeline.BANDS)
-        stack = np.stack([imagery.read_window(item, b, bbox, "planetary",
-                                              out_shape=shape)[0].astype("float32")
-                          for b in order], -1)
-        valid = preprocess.valid_mask(rep["scl"])
-        gng = pipeline.gng_bare(stack, order, valid, inside)
-        undet = inside & valid & ~gng
-
-        from pyproj import Transformer
-        to_wgs = Transformer.from_crs(crs, config.WGS84, always_xy=True)
-        for stratum, mask in (("detected", gng), ("undetected", undet)):
-            ys, xs = np.nonzero(mask)
-            if len(ys) == 0:
-                continue
-            take = rng.choice(len(ys), size=min(PER_STRATUM, len(ys)),
-                              replace=False)
-            for i in take:
-                # pixel centre -> map -> WGS84
-                x_m, y_m = rasterio.transform.xy(transform, ys[i], xs[i])
-                lon, lat = to_wgs.transform(x_m, y_m)
-                pid = f"{row['SITECODE']}_{year}_{stratum[:3]}_{i}"
-                rows.append({
-                    "point_id": pid, "site": row["SITE_NAME"], "year": year,
-                    "scene_date": day, "stratum": stratum,
-                    "lat": round(lat, 6), "lon": round(lon, 6),
-                    "truth": "",  # to be filled by the human labeller
-                    "notes": "",
-                })
-                feats_gj.append({
-                    "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
-                    "properties": {"point_id": pid, "site": row["SITE_NAME"],
-                                   "year": year, "stratum": stratum,
-                                   "scene_date": day},
-                })
-        print(f"{row['SITE_NAME'][:30]:30} {year}: sampled "
-              f"{min(PER_STRATUM, int(gng.sum()))} detected + "
-              f"{PER_STRATUM} undetected points")
-
-    OUT_CSV.parent.mkdir(exist_ok=True)
-    with open(OUT_CSV, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        w.writeheader(); w.writerows(rows)
-    OUT_GJ.write_text(json.dumps({"type": "FeatureCollection",
-                                  "features": feats_gj}))
-    print(f"\n{len(rows)} points -> {OUT_CSV} and {OUT_GJ}")
-    print("Label the `truth` column (bare_peat / vegetated / water / burn / "
-          "unsure) against high-res imagery, then run the scorer.")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run", required=True, type=Path)
+    parser.add_argument("--per-stratum", type=int, default=25)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--strata", choices=("gng", "agreement"), default="gng",
+                        help="gng: detected/undetected by GNG. agreement: adds a "
+                             "'disagreement' stratum (GNG=0 but another method=1), so the "
+                             "pixels where the methods differ are sampled directly")
+    args = parser.parse_args()
+    if args.per_stratum < 1:
+        parser.error("--per-stratum must be positive")
+    bundles = sorted(args.run.glob("*.npz"))
+    if not bundles:
+        parser.error("No frozen .npz scenes found in --run")
+    out = args.output_dir or args.run / ("annotation-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+    if out.exists():
+        parser.error(f"Output already exists; choose a new directory: {out}")
+    rng = np.random.default_rng(args.seed)
+    rows, locations, sources = [], [], []
+    for bundle in bundles:
+        meta_path = bundle.with_suffix(".json")
+        meta = json.loads(meta_path.read_text())
+        sources.append({"file": bundle.name, "sha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+                        "metadata_sha256": hashlib.sha256(meta_path.read_bytes()).hexdigest()})
+        with np.load(bundle, allow_pickle=False) as data:
+            valid = data["inside"] & data["valid"]
+            predictions = {m: data[f"prediction_{m}"].astype(bool)
+                           for m in ("ndvi", "rules", "kmeans", "gng")}
+            transform = rasterio.Affine(*meta["transform"][:6])
+            to_wgs = Transformer.from_crs(meta["crs"], config.WGS84, always_xy=True)
+            gng = predictions["gng"]
+            if args.strata == "agreement":
+                others = predictions["ndvi"] | predictions["rules"] | predictions["kmeans"]
+                strata = (("detected", valid & gng),
+                          ("disagreement", valid & ~gng & others),
+                          ("undetected", valid & ~gng & ~others))
+            else:
+                strata = (("detected", valid & gng), ("undetected", valid & ~gng))
+            for stratum, mask in strata:
+                ys, xs = np.nonzero(mask)
+                count = min(args.per_stratum, len(ys))
+                for i in rng.choice(len(ys), size=count, replace=False):
+                    y, x = int(ys[i]), int(xs[i])
+                    map_x, map_y = rasterio.transform.xy(transform, y, x)
+                    lon, lat = to_wgs.transform(map_x, map_y)
+                    # IDs do not reveal the detector's prediction to the annotator.
+                    pid = f"{meta['site_code']}_{meta['year']}_r{y}_c{x}"
+                    row = {"point_id": pid, "site": meta["site"], "year": meta["year"],
+                           "scene_date": meta["scene_date"], "scene_id": meta["scene_id"],
+                           "detector_version": meta["detector_version"],
+                           "role": meta.get("role", ""),
+                           "stratum": stratum, "stratum_population": len(ys),
+                           "stratum_sample_size": count, "pixel_row": y, "pixel_col": x,
+                           "lat": round(lat, 7), "lon": round(lon, 7),
+                           **{f"prediction_{m}": int(p[y, x]) for m, p in predictions.items()},
+                           "truth": "", "reference_source": "", "reference_date": "", "notes": ""}
+                    rows.append(row)
+                    locations.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                                      "properties": {k: row[k] for k in ("point_id", "site", "year", "scene_date")}})
+    if not rows:
+        parser.error("Frozen scenes contain no valid pixels")
+    out.mkdir(parents=True, exist_ok=False)
+    with (out / "accuracy_points.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0])); writer.writeheader(); writer.writerows(rows)
+    blind_fields = ["point_id", "site", "year", "scene_date", "lat", "lon", "truth", "reference_source", "reference_date", "notes"]
+    rng.shuffle(rows)
+    with (out / "labels.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=blind_fields, extrasaction="ignore")
+        writer.writeheader(); writer.writerows(rows)
+    (out / "locations.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": locations}))
+    (out / "manifest.json").write_text(json.dumps({"seed": args.seed, "per_stratum": args.per_stratum, "strata": args.strata,
+                                                  "source_run": str(args.run.resolve()), "sources": sources}, indent=2))
+    print(f"{len(rows)} points written to {out}")
+    print("Label labels.csv independently: bare_peat / vegetated / water / burn / other / unsure.")
+    print("Record reference imagery source/date. A bare surface alone does not establish active cutting.")
 
 
 if __name__ == "__main__":

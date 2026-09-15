@@ -1,5 +1,11 @@
 # peatland_masters
 
+**Current work (9 September 2026):** the approved peatland-monitoring topic is
+fixed and approximately one month remains. See [the completion plan](docs/completion-plan.md)
+for the current scope, radiometry correction, reproducible evaluation commands and
+remaining reference-label work. Historical area examples and timelines below
+predate these corrections. Existing deployed results require a versioned rebuild.
+
 **Working title.** Satellite-based detection of industrial turf-cutting in
 legally-protected Irish peatlands.
 
@@ -132,6 +138,42 @@ that can be inspected by a domain expert.
   public enforcement records and press reports.
 - **Sensitivity analysis** on key hyper-parameters (GNG node budget,
   edge age, SCL cloud tolerance, spectral band selection).
+
+### Reference labelling — how to run
+
+```bash
+python3 scripts/18_label_tool.py outputs/evaluation/2026-09-13-v3-sample/annotation
+```
+
+This opens a local page (http://localhost:8765) that shows each sampled
+pixel in Sentinel-2 true and false colour, next to high-resolution
+imagery. Keys `1`–`5` label, `0` marks unsure, `←`/`→` move between
+points. Every click is written straight to the blind `labels.csv`, so you
+can stop and resume at any time. When all points are labelled:
+
+```bash
+A=outputs/evaluation/2026-09-13-v3-sample/annotation
+python3 scripts/14_score_points.py $A/accuracy_points.csv --labels $A/labels.csv --output $A/accuracy.json
+```
+
+Date-matched 3 m reference imagery comes from PlanetScope, through Planet's
+Education and Research programme. It needs `PL_API_KEY` in the
+environment:
+
+```bash
+python3 scripts/20_planet_reference.py outputs/evaluation/2026-09-13-v3-sample
+```
+
+The tool then shows the PlanetScope close-ups as a third column. Planet
+imagery is licensed for non-commercial research only, so it stays in the
+gitignored `outputs/` and `web/private/` folders. It is shown only in the
+password-protected view of the web map (`/private/`), never on the public
+map; `web/README.md` covers the private tiles for the other bogs
+(`scripts/23_planet_release.py`). Cite: Planet Team (2026). Planet
+Application Program Interface: In Space for Life on Earth. San Francisco,
+CA. https://api.planet.com
+
+The protocol is in `docs/testing-and-validation.md` §3h.
 
 ## 6. Deliverables
 

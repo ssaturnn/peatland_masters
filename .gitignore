@@ -36,3 +36,10 @@ data/
 outputs/
 results/
 *.log
+
+# Licensed imagery (PlanetScope) for the password-protected /private/ area
+# of the site: never commit it. `railway up --no-gitignore` uploads it.
+web/private/
+
+# Matplotlib cache written by the scripts
+.mplcache/

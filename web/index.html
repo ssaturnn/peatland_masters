@@ -14,9 +14,13 @@
       <h1>Peatland turf-cutting monitor</h1>
       <p class="sub">Protected bogs · Galway · Mayo · Roscommon ·
         Sentinel-2 <span id="coverage"></span></p>
+      <p id="private-note" class="sub priv-note hidden">Private view · same-day
+        PlanetScope 3 m imagery (research licence)</p>
     </header>
 
     <section id="insight"></section>
+
+    <section id="planet" class="hidden"></section>
 
     <section class="controls">
       <div class="ctl">
@@ -29,7 +33,7 @@
       <div class="ctl">
         <label>Colour &amp; rank by</label>
         <div class="seg" id="metric">
-          <button data-v="new" class="on">New cutting</button>
+          <button data-v="new" class="on">Newly bare</button>
           <button data-v="rate">Rate/yr</button>
           <button data-v="pct">% bare</button>
         </div>
@@ -57,9 +61,11 @@
 
     <footer>
       <div id="legend"></div>
+      <p><a href="data/sites.geojson" download="peatland-results.geojson">Download mapped results (GeoJSON)</a></p>
+      <p id="private-link"><a href="/private/">PlanetScope 3 m view (password)</a></p>
       <p class="disclaimer">Each year is sampled in a fixed cutting-season
-        window (May–mid-July) and reports the peak bare-peat area over all
-        cloud-clear Sentinel-2 scenes. Detections are candidates from
+        window and reports the largest candidate bare-peat area among the
+        evaluated clear Sentinel-2 scenes. Detections are candidates from
         unsupervised multi-spectral clustering (GNG) with an NDVI baseline;
         confirming active cutting needs field / high-resolution validation.
         MSc research prototype.</p>
@@ -82,15 +88,23 @@
 
       <div class="card-figure">
         <div class="img-stack">
-          <img id="card-img-a" class="tile show" alt="Detected bare peat" />
-          <img id="card-img-b" class="tile" alt="" />
+          <img id="card-img-a" class="tile show" alt="Detected bare peat" draggable="false" />
+          <img id="card-img-b" class="tile" alt="" draggable="false" />
+          <img id="card-img-ps" class="tile" alt="Same-day PlanetScope 3 m image" draggable="false" />
+          <div id="swipe" class="swipe hidden" role="slider" tabindex="0"
+               aria-label="Compare Sentinel-2 10 m with PlanetScope 3 m"
+               aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+            <span class="swipe-chip l">Sentinel-2 · 10 m</span>
+            <span class="swipe-chip r">PlanetScope · 3 m</span>
+          </div>
         </div>
-        <div id="card-noimg" class="card-noimg hidden">No clear image this year</div>
+        <div id="card-noimg" class="card-noimg hidden">Image unavailable for this year</div>
         <div class="card-legend" id="card-legend">
           <span><i class="sw sw-gng"></i>GNG</span>
           <span><i class="sw sw-ndvi"></i>NDVI</span>
         </div>
         <button id="ovl-btn" class="ovl-on" title="Toggle detection overlays">Overlays: on</button>
+        <button id="ps-btn" class="hidden" title="Compare with same-day PlanetScope 3 m imagery">PlanetScope 3 m</button>
         <div class="year-pill" id="year-pill"></div>
       </div>
 

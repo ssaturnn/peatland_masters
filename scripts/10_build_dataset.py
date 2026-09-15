@@ -8,6 +8,7 @@ produces a usable map. Delete a cache file to recompute that site.
 """
 
 import sys
+import argparse
 import json
 import time
 from pathlib import Path
@@ -30,11 +31,14 @@ def properties(row, r):
     site_ha = r["site_ha"]
     plots = row.get("plots_2022")
     return {
+        "detector_version": r.get("detector_version", "legacy-unversioned"),
         "code": row["SITECODE"],
         "name": row["SITE_NAME"],
         "county": config.TARGET_COUNTIES[row["COUNTY"]],
         "designation": row["designation"],
         "source": row.get("source", "NHA"),
+        "bog_type": row.get("bog_type", "raised"),
+        "water_excl_pct": r.get("water_excl_pct"),
         "plots_2022": None if plots is None or (isinstance(plots, float)
                       and plots != plots) else int(plots),
         "plots_2021": (lambda v: None if v is None or (isinstance(v, float)
@@ -44,6 +48,9 @@ def properties(row, r):
         "ndvi_series": r["ndvi_series"],
         "gng_series": r["gng_series"],
         "dates": r["dates"],
+        "scene_ids": r.get("scene_ids"),
+        "processing_baselines": r.get("processing_baselines"),
+        "matrix_series": r.get("matrix_series"),
         "span": r["span"],
         "bare_now_ndvi_ha": ndvi_now,
         "bare_now_gng_ha": gng_now,
@@ -67,7 +74,31 @@ def write_geojson(features):
 
 
 def main():
+    global CACHE_DIR, OUT
+    parser = argparse.ArgumentParser(description="Build a versioned dataset; reject stale detector caches")
+    parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR)
+    parser.add_argument("--output", type=Path, default=OUT)
+    parser.add_argument("--site", help="Optional literal site-name fragment for a pilot build")
+    args = parser.parse_args()
+    CACHE_DIR, OUT = args.cache_dir, args.output
     sites = boundaries.build_sites()
+    if args.site:
+        sites = sites[sites.SITE_NAME.str.contains(args.site, regex=False)]
+        if sites.empty:
+            parser.error(f"No site matches {args.site!r}")
+        if OUT.resolve() == (config.REPO_ROOT / "web/data/sites.geojson").resolve():
+            parser.error("A pilot --site build requires a separate --output; it cannot replace the full web dataset")
+    # Check every reused cache before writing any output, preventing a mix of
+    # incompatible radiometry/detector versions in the same released dataset.
+    stale = []
+    for code in sites["SITECODE"]:
+        cache_f = CACHE_DIR / f"{code}.json"
+        if cache_f.exists():
+            cached = json.loads(cache_f.read_text())
+            if cached.get("detector_version") != pipeline.DETECTOR_VERSION:
+                stale.append(code)
+    if stale:
+        parser.error(f"{len(stale)} stale caches: choose a new --cache-dir and separate --output for {pipeline.DETECTOR_VERSION}; preserve the previous release")
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     print(f"{len(sites)} sites to process\n")
 

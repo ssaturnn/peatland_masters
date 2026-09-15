@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blind labelling · Peatland monitor</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.css">
+<style>
+:root {
+  --bg: #0e1311; --panel: #151c19; --panel2: #1b2420; --line: #26312c;
+  --text: #e5ece8; --muted: #8fa39a; --accent: #4ade80; --target: #fde047;
+  --c-bare_peat: #c07a3a; --c-vegetated: #4caf6e; --c-water: #3b82f6;
+  --c-burn: #f97316; --c-other: #a78bfa; --c-unsure: #94a3b8;
+  --chip: min(calc((100vh - 176px) / 2), 22vw);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+header { display: flex; align-items: center; gap: 18px; padding: 10px 18px;
+  border-bottom: 1px solid var(--line); background: var(--panel); }
+.brand { font-weight: 650; white-space: nowrap; }
+.brand small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.progress { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 180px; }
+.bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+.count { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.count b { color: var(--text); }
+.nav { display: flex; gap: 6px; }
+button { font: inherit; color: var(--text); cursor: pointer; }
+.nav button { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.nav button:hover { border-color: #3b4b44; }
+kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+  background: #0b0f0d; border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 5px; }
+#strip { display: flex; flex-wrap: wrap; gap: 3px; padding: 7px 18px;
+  border-bottom: 1px solid var(--line); max-height: 40px; overflow: auto; }
+#strip span { width: 9px; height: 9px; border-radius: 2px; background: #2b3631; cursor: pointer; }
+#strip span.cur { outline: 2px solid var(--text); outline-offset: 1px; }
+#done { margin: 10px 18px 0; padding: 10px 14px; border-radius: 10px;
+  border: 1px solid #2f5d40; background: #14261b; }
+#done code { background: #0b0f0d; padding: 2px 6px; border-radius: 5px; font-size: 12px; }
+main { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; padding: 14px 18px; }
+.chips { display: grid; grid-template-columns: repeat(2, var(--chip)); gap: 8px 10px; align-content: start; }
+.chips.has-ps { grid-template-columns: repeat(3, var(--chip)); }
+main.has-ps { --chip: min(calc((100vh - 176px) / 2), 18.5vw); }
+figure { margin: 0; }
+/* never let a selection highlight tint the imagery the labels depend on */
+.chips, .chips figure, .chips img { -webkit-user-select: none; user-select: none; -webkit-user-drag: none; }
+figure img { width: var(--chip); height: var(--chip); display: block; border-radius: 8px;
+  background: #000; border: 1px solid var(--line); image-rendering: pixelated; }
+figcaption { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 3px; }
+.right { display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  height: calc(var(--chip) * 2 + 48px); }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.meta .site { font-size: 17px; font-weight: 650; }
+.muted { color: var(--muted); }
+.pill { font-size: 12px; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--line); }
+#map { flex: 1; min-height: 180px; border-radius: 10px; border: 1px solid var(--line);
+  overflow: hidden; position: relative; background: #0b0f0d; }
+.mapmsg { position: absolute; left: 10px; top: 10px; z-index: 2; font-size: 12px; color: var(--muted);
+  background: rgba(11, 15, 13, .85); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; }
+.mapmsg.err { color: #fca5a5; border-color: #7f1d1d; }
+.nomap { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 20px; text-align: center; }
+.links { display: flex; flex-wrap: wrap; gap: 6px; }
+.links a, .links button { font-size: 12px; text-decoration: none; color: var(--text);
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+.links a:hover, .links button:hover { border-color: #3b4b44; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.q { display: flex; justify-content: space-between; gap: 10px; font-weight: 600; margin-bottom: 9px; }
+#state { font-weight: 400; color: var(--muted); }
+.classes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.cls { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel2); font-weight: 550; text-align: left;
+  transition: transform .06s, border-color .15s, background .15s; }
+.cls:hover { border-color: var(--c); }
+.cls:active { transform: scale(.98); }
+.cls .sw { width: 12px; height: 12px; border-radius: 3px; background: var(--c); flex: none; }
+.cls kbd { margin-left: auto; }
+.cls.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 24%, var(--panel2)); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 9px; }
+.ev { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 12px; color: var(--muted); }
+.ev label, .auto { display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; font-size: 12px; color: var(--muted); }
+#notes { flex: 1; min-width: 160px; background: #0b0f0d; color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; }
+#notes:focus { outline: none; border-color: var(--accent); }
+.keys { font-size: 11px; color: var(--muted); margin-top: 8px; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 16px); opacity: 0;
+  background: #0b0f0d; border: 1px solid var(--line); padding: 8px 14px; border-radius: 10px;
+  transition: all .18s; pointer-events: none; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.err { border-color: #b91c1c; }
+#guide { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none;
+  align-items: center; justify-content: center; z-index: 10; }
+#guide.open { display: flex; }
+#guide .card { max-width: 780px; max-height: 88vh; overflow: auto; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 14px; padding: 20px 26px; }
+#guide h2 { margin: 0 0 6px; font-size: 19px; }
+#guide p { color: #c9d4ce; margin: 6px 0; }
+#guide dt { font-weight: 650; margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+#guide dt i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+#guide dd { margin: 3px 0 0 20px; color: #c9d4ce; }
+#guide h3 { margin: 14px 0 4px; font-size: 15px; }
+#guide ol, #guide ul { margin: 4px 0 0 20px; padding: 0; color: #c9d4ce; }
+#guide li { margin: 4px 0; }
+#guide .key img { width: 100%; display: block; border-radius: 8px; border: 1px solid var(--line); margin-top: 6px; }
+@media (max-width: 1100px) {
+  :root { --chip: min(44vw, 320px); }
+  main { grid-template-columns: 1fr; }
+  .right { height: auto; }
+  #map { height: 320px; flex: none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Blind labelling <small>Peatland monitor · reference sample</small></div>
+  <div class="progress"><div class="bar"><i id="barfill"></i></div><span class="count" id="count">loading…</span></div>
+  <div class="nav">
+    <button id="prev" title="Previous (←)">◀</button>
+    <button id="next" title="Next (→)">▶</button>
+    <button id="skip" title="Next unlabelled point">Next unlabelled <kbd>N</kbd></button>
+    <button id="help" title="Labelling guide">Guide <kbd>?</kbd></button>
+  </div>
+</header>
+<div id="strip"></div>
+<div id="done" hidden></div>
+<main>
+  <section class="chips">
+    <figure><img id="tc_near" alt="True colour, close-up"><figcaption><span>True colour</span><span>330 m</span></figcaption></figure>
+    <figure><img id="fc_near" alt="False colour, close-up"><figcaption><span>False colour · NIR / red / green</span><span>330 m</span></figcaption></figure>
+    <figure id="f_ps_tc" hidden><img id="ps_tc" alt="PlanetScope true colour, same week"><figcaption><span>PlanetScope 3 m · true colour</span><span>same week</span></figcaption></figure>
+    <figure><img id="tc_far" alt="True colour, context"><figcaption><span>True colour · context, white = assessed area</span><span>1.2 km</span></figcaption></figure>
+    <figure><img id="fc_far" alt="False colour, context"><figcaption><span>False colour · context</span><span>1.2 km</span></figcaption></figure>
+    <figure id="f_ps_fc" hidden><img id="ps_fc" alt="PlanetScope false colour, same week"><figcaption><span>PlanetScope 3 m · false colour</span><span>330 m</span></figcaption></figure>
+  </section>
+  <section class="right">
+    <div class="meta">
+      <span class="site" id="site">–</span>
+      <span class="pill" id="date">–</span>
+      <span class="muted" id="idx"></span>
+      <span class="muted" id="coords"></span>
+    </div>
+    <div id="map"></div>
+    <div class="links" id="links"></div>
+    <div class="panel">
+      <div class="q"><span>What covers the yellow square on <span id="qdate">this date</span>?</span><span id="state"></span></div>
+      <div class="classes" id="classes"></div>
+      <div class="row"><div class="ev" id="ev"><span>Evidence used:</span></div></div>
+      <div class="row">
+        <input id="notes" placeholder="Notes (optional) — press E to type, Enter to save" autocomplete="off">
+        <label class="auto"><input type="checkbox" id="auto"> auto-advance</label>
+      </div>
+      <div class="keys"><kbd>1</kbd>–<kbd>5</kbd> label · <kbd>0</kbd> unsure · <kbd>←</kbd><kbd>→</kbd> move · <kbd>N</kbd> next unlabelled · <kbd>G</kbd> go to point · <kbd>⌫</kbd> clear · <kbd>?</kbd> guide</div>
+    </div>
+  </section>
+</main>
+
+<div id="guide"><div class="card">
+  <h2>How to label</h2>
+  <p>Label what covers the <b>yellow 10 m square</b> on the Sentinel-2 date shown. If the square is mixed,
+     choose the cover that fills most of it.</p>
+  <h3>Three questions, in order</h3>
+  <ol>
+    <li><b>Is it red or pink in false colour?</b> &rarr; <b>2 Vegetated</b>. Straw-brown heath and grass usually
+        stay pinkish &mdash; the false colour decides, not the true colour.
+        <b>Exception &mdash; very dry years</b> (2018 was a drought): dead grass can turn beige even in false colour.
+        A large, uniform pale area with no cut banks, over a surface that looks grassy in the high-res map, is dried
+        vegetation, not bare peat &mdash; label it Vegetated, or Unsure if you cannot tell.</li>
+    <li><b>Is it very dark and smooth &mdash; dark blue to black in false colour?</b> &rarr; <b>3 Water</b>: pools, lakes, flooded cuttings, sea.</li>
+    <li><b>Neither &mdash; look at shape and setting.</b>
+      <ul>
+        <li>strips, rectangles or a worked face, usually at the bog margin; turf banks in the high-res map
+            &rarr; <b>1 Bare peat</b>. Dark brown when fresh or wet, pale tan when dry.</li>
+        <li>a large irregular charcoal-dark patch across the bog surface, no bank geometry &rarr; <b>4 Burn scar</b>.</li>
+        <li>road, track, building, rock, sand, tidal mud &rarr; <b>5 Other</b>.</li>
+      </ul></li>
+  </ol>
+  <p>Cloud or shadow on the square, or truly half-and-half &rarr; <b>0 Unsure</b>. Keep it rare: unsure points
+     are left out of the metrics.</p>
+  <p>The high-resolution map shows <i>what kind</i> of place this is &mdash; banks, pools, tracks &mdash; but it may
+     date from another year. The Sentinel-2 chips decide the state on the date.</p>
+  <p><b>PlanetScope 3 m</b> (third column, when available) is from the same week as the Sentinel-2 image: like
+     Sentinel-2 it shows the state on the date, three times sharper. Use it to settle bare peat versus dry grass:
+     smooth surfaces with straight edges are cut peat, tussocky texture is vegetation.</p>
+  <h3>Classes</h3>
+  <dl>
+    <dt><i style="background:var(--c-bare_peat)"></i>1 · Bare peat</dt>
+    <dd>Exposed peat: fresh cut faces, spread or stacked turf, milled or stripped surfaces. Dark brown when
+        fresh or wet, pale tan to beige once dry. In false colour brown, beige or grey &mdash; never red.</dd>
+    <dt><i style="background:var(--c-vegetated)"></i>2 · Vegetated</dt>
+    <dd>Any plant cover, living or dead: heath, grass, rush, moss, scrub, forest, including winter-brown or
+        dry vegetation. Usually red to pink in false colour; very dry dead grass can look beige, and then texture,
+        extent and the absence of cut banks decide.</dd>
+    <dt><i style="background:var(--c-water)"></i>3 · Water</dt>
+    <dd>Lakes, pools, flooded cuttings, sea, drains wide enough to fill the square. Dark blue-green to black in
+        true colour, very dark blue in false colour, smooth.</dd>
+    <dt><i style="background:var(--c-burn)"></i>4 · Burn scar</dt>
+    <dd>Recently burnt vegetation: a large irregular patch, charcoal-black to very dark brown, without bank
+        geometry. Very dark in false colour.</dd>
+    <dt><i style="background:var(--c-other)"></i>5 · Other</dt>
+    <dd>Roads, tracks, buildings, rock, sand, gravel, tidal mud, bare mineral soil.</dd>
+    <dt><i style="background:var(--c-unsure)"></i>0 · Unsure</dt>
+    <dd>Cloud, cloud shadow, or genuinely undecidable.</dd>
+  </dl>
+  <div class="key"><h3>Examples from these scenes</h3>
+    <img src="/key.png" alt="Interpretation key" onerror="this.parentElement.hidden = true"></div>
+  <p><b>Blind protocol.</b> This tool never shows what any detector predicted. Please don't look points up
+     on the project map while labelling.</p>
+  <p class="muted">Press <kbd>Esc</kbd> or <kbd>?</kbd> to close.</p>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.js"></script>
+<script>
+const CLASSES = [
+  { id: "bare_peat", name: "Bare peat", key: "1" },
+  { id: "vegetated", name: "Vegetated", key: "2" },
+  { id: "water", name: "Water", key: "3" },
+  { id: "burn", name: "Burn scar", key: "4" },
+  { id: "other", name: "Other", key: "5" },
+  { id: "unsure", name: "Unsure", key: "0" },
+];
+const EVIDENCE = ["S2 true colour", "S2 false colour", "PlanetScope", "Esri World Imagery", "Google Earth", "Bing", "GeoHive"];
+const KINDS = ["tc_near", "fc_near", "tc_far", "fc_far"];
+const $ = (id) => document.getElementById(id);
+const nameOf = (id) => (CLASSES.find((c) => c.id === id) || {}).name || id;
+// labels proposed by the second annotator stay "to review" until confirmed here
+const pending = (p) => /second annotator/.test(p.reference_source || "");
+
+let P = [], i = 0, map = null, mapReady = false, scoreCmd = "";
+let prefs = { evidence: ["S2 true colour", "S2 false colour", "Esri World Imagery"], auto: true };
+try { Object.assign(prefs, JSON.parse(localStorage.getItem("label-prefs") || "{}")); } catch (e) {}
+const savePrefs = () => { try { localStorage.setItem("label-prefs", JSON.stringify(prefs)); } catch (e) {} };
+
+function toast(msg, err) {
+  const t = $("toast");
+  t.textContent = msg; t.classList.toggle("err", !!err); t.classList.add("show");
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 1400);
+}
+
+function buildControls() {
+  $("classes").innerHTML = CLASSES.map((c) =>
+    `<button class="cls" data-id="${c.id}" style="--c:var(--c-${c.id})">
+       <span class="sw"></span>${c.name}<kbd>${c.key}</kbd></button>`).join("");
+  $("classes").addEventListener("click", (e) => {
+    const b = e.target.closest(".cls"); if (b) label(b.dataset.id);
+  });
+  $("ev").insertAdjacentHTML("beforeend", EVIDENCE.map((v) =>
+    `<label><input type="checkbox" value="${v}">${v}</label>`).join(""));
+  $("auto").checked = prefs.auto;
+  $("auto").addEventListener("change", (e) => { prefs.auto = e.target.checked; savePrefs(); });
+  $("prev").onclick = () => go(i - 1);
+  $("next").onclick = () => go(i + 1);
+  $("skip").onclick = () => { const n = nextUnlabelled(i); if (n !== -1) go(n); };
+  $("help").onclick = () => toggleGuide();
+  $("guide").addEventListener("click", (e) => { if (e.target.id === "guide") toggleGuide(false); });
+  for (const k of KINDS) $(k).onerror = function () { this.alt = "chip missing"; };
+  $("ps_tc").onload = () => setPS(true);
+  $("ps_tc").onerror = () => setPS(false);
+}
+
+function square(lat, lon, half) {
+  const dLat = half / 111320, dLon = half / (111320 * Math.cos(lat * Math.PI / 180));
+  return [[lon - dLon, lat - dLat], [lon + dLon, lat - dLat], [lon + dLon, lat + dLat],
+          [lon - dLon, lat + dLat], [lon - dLon, lat - dLat]];
+}
+
+function initMap() {
+  if (!window.maplibregl) {
+    $("map").innerHTML = '<div class="nomap">High-resolution map unavailable (offline?) — use the links below.</div>';
+    return;
+  }
+  map = new maplibregl.Map({
+    container: "map",
+    style: { version: 8, sources: { esri: { type: "raster", tileSize: 256, maxzoom: 19,
+      tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+      attribution: "Esri, Maxar, Earthstar Geographics" } },
+      layers: [{ id: "esri", type: "raster", source: "esri" }] },
+    center: [-8.7, 53.5], zoom: 16, attributionControl: { compact: true },
+  });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+  const msg = document.createElement("div");
+  msg.className = "mapmsg"; msg.textContent = "Loading imagery…";
+  $("map").appendChild(msg);
+  map.on("error", (e) => {
+    msg.classList.add("err"); msg.hidden = false;
+    msg.textContent = `Imagery failed to load (${(e.error && e.error.message) || "network error"}) — use the links below.`;
+  });
+  map.on("idle", () => { if (!msg.classList.contains("err")) msg.hidden = true; });
+  map.on("dataloading", () => { if (!msg.classList.contains("err")) { msg.textContent = "Loading imagery…"; msg.hidden = false; } });
+  if (/[?&]debug/.test(location.search)) setInterval(() => {
+    const c = map.getCanvas(), r = $("map").getBoundingClientRect();
+    msg.hidden = false; msg.classList.remove("err");
+    msg.textContent = `box ${Math.round(r.width)}x${Math.round(r.height)} · canvas ${c.width}x${c.height} · style ${map.isStyleLoaded()} · tiles ${map.areTilesLoaded()} · z ${map.getZoom().toFixed(1)}`;
+  }, 400);
+  const onReady = () => { if (!mapReady && ensureOverlay() && P.length) moveMap(P[i]); };
+  map.on("load", onReady);
+  map.on("styledata", onReady);
+}
+
+function ensureOverlay() {
+  if (mapReady) return true;
+  if (!map || !map.isStyleLoaded()) return false;
+  map.addSource("px", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "ring", type: "line", source: "px", filter: ["==", ["get", "k"], "ring"],
+    paint: { "line-color": "#fde047", "line-width": 1.5, "line-dasharray": [2, 2] } });
+  map.addLayer({ id: "px-casing", type: "line", source: "px", filter: ["==", ["get", "k"], "px"],
+    paint: { "line-color": "#000", "line-width": 4 } });
+  map.addLayer({ id: "px", type: "line", source: "px", filter: ["==", ["get", "k"], "px"],
+    paint: { "line-color": "#fde047", "line-width": 2 } });
+  mapReady = true;
+  return true;
+}
+
+function moveMap(p) {
+  if (!map) return;
+  const lat = +p.lat, lon = +p.lon;
+  map.jumpTo({ center: [lon, lat], zoom: 17.2 });
+  if (!ensureOverlay()) return;
+  map.getSource("px").setData({ type: "FeatureCollection", features: [
+    { type: "Feature", properties: { k: "px" }, geometry: { type: "Polygon", coordinates: [square(lat, lon, 5)] } },
+    { type: "Feature", properties: { k: "ring" }, geometry: { type: "Polygon", coordinates: [square(lat, lon, 40)] } },
+  ] });
+}
+
+function links(p) {
+  const lat = (+p.lat).toFixed(6), lon = (+p.lon).toFixed(6);
+  const L = [
+    ["Google Earth", `https://earth.google.com/web/@${lat},${lon},120a,350d,35y,0h,0t,0r`],
+    ["Google Maps", `https://www.google.com/maps/@${lat},${lon},150m/data=!3m1!1e3`],
+    ["Bing aerial", `https://www.bing.com/maps?cp=${lat}~${lon}&lvl=18&style=a`],
+    ["Esri Wayback (dated)", `https://livingatlas.arcgis.com/wayback/#mapCenter=${lon}%2C${lat}%2C18`],
+    ["GeoHive", `https://webapps.geohive.ie/mapviewer/index.html?center=${lon},${lat}&level=17`],
+  ];
+  $("links").innerHTML = L.map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${t} ↗</a>`).join("")
+    + `<button id="copy">Copy coordinates</button>`;
+  $("copy").onclick = () => {
+    (navigator.clipboard ? navigator.clipboard.writeText(`${lat}, ${lon}`) : Promise.reject())
+      .then(() => toast("Coordinates copied"), () => toast(`${lat}, ${lon}`));
+  };
+}
+
+function nextUnlabelled(from) {
+  for (let s = 1; s <= P.length; s++) {
+    const k = (from + s) % P.length;
+    if (!P[k].truth || pending(P[k])) return k;
+  }
+  return -1;
+}
+
+function progress() {
+  const n = P.filter((p) => p.truth && !pending(p)).length;
+  const m = P.filter(pending).length;
+  $("barfill").style.width = `${P.length ? 100 * n / P.length : 0}%`;
+  $("count").innerHTML = `<b>${n}</b> / ${P.length} labelled${m ? ` · <b>${m}</b> to review` : ""}`;
+  const done = P.length && n === P.length;
+  $("done").hidden = !done;
+  if (done) $("done").innerHTML = `<b>All ${P.length} points labelled.</b> Score them with <code>${scoreCmd}</code>`;
+}
+
+function strip() {
+  const s = $("strip");
+  if (s.children.length !== P.length) {
+    s.innerHTML = P.map((_, k) => `<span data-k="${k}" title="Point ${k + 1}"></span>`).join("");
+    s.onclick = (e) => { if (e.target.dataset.k !== undefined) go(+e.target.dataset.k); };
+  }
+  [...s.children].forEach((el, k) => {
+    el.style.background = P[k].truth ? `var(--c-${P[k].truth})` : "";
+    el.style.opacity = pending(P[k]) ? "0.4" : "";
+    el.classList.toggle("cur", k === i);
+  });
+}
+
+function preload(k) {
+  const p = P[k]; if (!p) return;
+  for (const kind of KINDS) new Image().src = `/chips/${encodeURIComponent(p.point_id)}_${kind}.png`;
+}
+
+// date-matched PlanetScope close-ups: a third column whenever they exist
+function setPS(on) {
+  $("f_ps_tc").hidden = $("f_ps_fc").hidden = !on;
+  document.querySelector(".chips").classList.toggle("has-ps", on);
+  document.querySelector("main").classList.toggle("has-ps", on);
+  if (map) setTimeout(() => map.resize(), 0);
+}
+
+function render() {
+  const p = P[i];
+  $("site").textContent = p.site;
+  $("date").textContent = p.scene_date;
+  $("qdate").textContent = p.scene_date;
+  $("idx").textContent = `point ${i + 1} of ${P.length}`;
+  $("coords").textContent = `${(+p.lat).toFixed(5)}, ${(+p.lon).toFixed(5)}`;
+  for (const kind of KINDS) $(kind).src = `/chips/${encodeURIComponent(p.point_id)}_${kind}.png`;
+  setPS(false);
+  $("ps_tc").src = `/chips/${encodeURIComponent(p.point_id)}_ps_tc.png`;
+  $("ps_fc").src = `/chips/${encodeURIComponent(p.point_id)}_ps_fc.png`;
+  document.querySelectorAll(".cls").forEach((b) => b.classList.toggle("on", b.dataset.id === p.truth));
+  $("state").textContent = !p.truth ? "not labelled yet" : pending(p)
+    ? `second annotator says ${nameOf(p.truth)} — press a key to confirm or change` : `saved: ${nameOf(p.truth)}`;
+  const ev = p.truth && !pending(p) ? (p.reference_source || "").split(" + ").filter(Boolean) : prefs.evidence;
+  document.querySelectorAll(".ev input").forEach((cb) => { cb.checked = ev.includes(cb.value); });
+  if (document.activeElement !== $("notes")) $("notes").value = p.notes || "";
+  links(p); moveMap(p); strip(); progress(); preload(i + 1);
+}
+
+function go(k) {
+  if (!P.length) return;
+  i = (k + P.length) % P.length;
+  $("notes").blur();
+  render();
+}
+
+async function label(truth) {
+  const p = P[i];
+  const evidence = [...document.querySelectorAll(".ev input:checked")].map((c) => c.value);
+  if (truth && truth !== "unsure") { prefs.evidence = evidence; savePrefs(); }
+  const body = { point_id: p.point_id, truth,
+    reference_source: truth ? evidence.join(" + ") : "",
+    reference_date: truth ? p.scene_date : "", notes: $("notes").value.trim() };
+  try {
+    const r = await fetch("/api/label", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.status);
+    Object.assign(p, body);
+    toast(truth ? `Saved · ${nameOf(truth)}` : "Label cleared");
+    $("notes").blur();
+    render();
+    if (truth && prefs.auto) {
+      const n = nextUnlabelled(i);
+      if (n !== -1) setTimeout(() => go(n), 170);
+    }
+  } catch (e) {
+    toast(`Not saved — ${e.message}. Is the tool still running?`, true);
+  }
+}
+
+function toggleGuide(force) {
+  const g = $("guide");
+  g.classList.toggle("open", force === undefined ? !g.classList.contains("open") : force);
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.id === "notes") {
+    if (e.key === "Escape") e.target.blur();
+    if (e.key === "Enter") { e.preventDefault(); if (P[i].truth) label(P[i].truth); else e.target.blur(); }
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey || !P.length) return;
+  if ($("guide").classList.contains("open")) {
+    if (e.key === "Escape" || e.key === "?") toggleGuide(false);
+    return;
+  }
+  const c = CLASSES.find((c) => c.key === e.key);
+  if (c) { e.preventDefault(); return label(c.id); }
+  switch (e.key) {
+    case "u": case "U": return label("unsure");
+    case "ArrowRight": e.preventDefault(); return go(i + 1);
+    case "ArrowLeft": e.preventDefault(); return go(i - 1);
+    case "n": case "N": { const n = nextUnlabelled(i); if (n !== -1) go(n); return; }
+    case "Backspace": case "Delete": e.preventDefault(); return label("");
+    case "e": case "E": e.preventDefault(); return $("notes").focus();
+    case "?": case "h": case "H": return toggleGuide();
+    case "g": case "G": {
+      const v = prompt(`Go to point number (1-${P.length}):`);
+      if (v && +v >= 1 && +v <= P.length) go(+v - 1);
+      return;
+    }
+  }
+});
+
+window.addEventListener("hashchange", () => {
+  const h = /^#(\d+)$/.exec(location.hash);
+  if (h && P.length && +h[1] >= 1 && +h[1] <= P.length) go(+h[1] - 1);
+});
+buildControls();
+initMap();
+fetch("/api/points").then((r) => r.json()).then((d) => {
+  P = d.points; scoreCmd = d.score_cmd || "";
+  if (!P.length) { $("count").textContent = "no points"; return; }
+  const first = P.findIndex((p) => !p.truth || pending(p));
+  i = first === -1 ? 0 : first;
+  const h = /^#(\d+)$/.exec(location.hash);
+  if (h && +h[1] >= 1 && +h[1] <= P.length) i = +h[1] - 1;
+  render();
+  if (!P.some((p) => p.truth)) toggleGuide(true);
+}).catch(() => { $("count").textContent = "cannot reach the labelling server"; });
+</script>
+</body>
+</html>

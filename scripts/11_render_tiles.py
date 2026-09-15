@@ -10,6 +10,9 @@ the numbers. Resumable: existing tiles are skipped.
 """
 
 import sys
+import argparse
+import json
+import rasterio
 import time
 from pathlib import Path
 
@@ -28,6 +31,7 @@ PROVIDER = "planetary"
 YEARS = pipeline.YEARS
 BANDS = pipeline.BANDS
 OUT_DIR = Path(__file__).resolve().parents[1] / "web" / "data" / "tiles"
+CACHE_DIR = config.OUT_DIR / "cache"
 MAXPX = 360  # cap long side of the saved image
 
 
@@ -75,76 +79,67 @@ def render(rgb, gng_mask, ndvi_mask, inside, out_path, clean_path=None):
     plt.close(fig)
 
 
-def _cache_dates(code):
-    """year -> chosen max-activity scene date, from the dataset cache, so
-    the rendered picture matches the numbers on the card."""
-    f = config.OUT_DIR / "cache" / f"{code}.json"
-    if not f.exists():
-        return {}
-    import json
-    r = json.loads(f.read_text())
-    return {int(y): d for y, d in zip(r.get("years", []), r.get("dates", []))}
-
-
 def process_site(row, bbox):
-    ref = imagery.search_scene(PROVIDER, bbox, "2021-05-01/2021-09-15",
-                               max_cloud=40)
-    if ref is None:
-        return 0
-    red0, transform, crs = imagery.read_window(ref, "red", bbox, PROVIDER)
-    shape = red0.shape
+    cache_file = CACHE_DIR / f"{row['SITECODE']}.json"
+    record = json.loads(cache_file.read_text())
+    if record.get("detector_version") != pipeline.DETECTOR_VERSION:
+        raise ValueError("Stale detector cache: rebuild into a new cache directory first")
+    grid = record["grid"]
+    shape = tuple(grid["shape"])
+    transform = rasterio.Affine(*grid["transform"][:6])
+    crs = grid["crs"]
     geom = gpd.GeoSeries([row["geometry"]], crs=config.ITM).to_crs(crs).iloc[0]
     inside = geo.polygon_mask(geom, shape, transform)
-    dates = _cache_dates(row["SITECODE"])
-
+    # the dataset build screens intertidal pixels out of detection; the
+    # rendered masks must use the exact same exclusion or images and
+    # numbers diverge (the site outline still shows the full boundary)
+    det_inside = inside
+    if record.get("tidal_mask_b64"):
+        det_inside = inside & ~pipeline.mask_from_b64(
+            record["tidal_mask_b64"], shape)
+    collection = None
     made = 0
-    for yr in YEARS:
+    for yr, day, scene_id in zip(record["years"], record["dates"], record["scene_ids"]):
         out = OUT_DIR / f"{row['SITECODE']}_{yr}.jpg"
         clean = OUT_DIR / f"{row['SITECODE']}_{yr}c.jpg"
-        if out.exists() and clean.exists():
+        manifest = out.with_suffix(".json")
+        identity = {"scene_id": scene_id, "scene_date": day,
+                    "detector_version": pipeline.DETECTOR_VERSION}
+        if (out.exists() and clean.exists() and manifest.exists()
+                and json.loads(manifest.read_text()) == identity):
             continue
-        # render the exact scene the dataset chose for this year, so the
-        # image matches the reported number; fall back to clearest-in-window
-        rng = (f"{dates[yr]}/{dates[yr]}" if yr in dates
-               else pipeline._year_range(yr))
-        item, rep = preprocess.pick_clear_scene(
-            PROVIDER, bbox, rng, shape,
-            aoi_mask=inside, min_clear=0.80, limit=12)
-        if item is None and yr in dates:
-            item, rep = preprocess.pick_clear_scene(
-                PROVIDER, bbox, pipeline._year_range(yr), shape,
-                aoi_mask=inside, min_clear=0.85, limit=12)
+        if collection is None:
+            collection = imagery.open_catalog(PROVIDER).get_collection(
+                imagery.PROVIDERS[PROVIDER]["collection"])
+        item = collection.get_item(scene_id)
         if item is None:
-            continue
-        # don't render a visibly cloudy tile — the card shows "no clear
-        # image" for that year instead of a misleading cloudy picture
-        if rep["aoi_clear"] < 0.82:
-            continue
-        order = list(BANDS)
-        layers = [imagery.read_window(item, b, bbox, PROVIDER, out_shape=shape)[0]
-                  .astype("float32") for b in order]
-        stack = np.stack(layers, axis=-1)
-        red = stack[:, :, order.index("red")]
-        nir = stack[:, :, order.index("nir")]
-        ndvi = detect.ndvi(red, nir)
-        valid = preprocess.valid_mask(rep["scl"])
-        ndvi_mask = pipeline.ndvi_bare(stack, order, ndvi, valid, inside)
-        gng_mask = pipeline.gng_bare(stack, order, valid, inside)
-        rgb = natural_rgb(stack, order)
-        # haze guard: SCL sometimes passes thin cloud/haze as clear. If too
-        # much of the bog is near-white, skip — the card shows "no clear
-        # image" rather than a washed-out picture.
-        gray = rgb.mean(axis=2)
-        if (gray[inside] > 0.75).mean() > 0.18:
-            continue
-        render(rgb, gng_mask, ndvi_mask, inside, out, clean_path=clean)
+            raise ValueError(f"Chosen scene is unavailable: {scene_id}; no substitute scene is rendered")
+        rep = preprocess.assess_scene(item, bbox, PROVIDER, shape, aoi_mask=inside)
+        d = pipeline.detect_year(item, bbox, PROVIDER, shape, det_inside,
+                                 rep["scl"])
+        if not pipeline.scene_passes(d):
+            raise ValueError(f"Chosen scene no longer passes the shared quality gates: {scene_id}")
+        render(natural_rgb(d["stack"], BANDS), d["gng"], d["ndvi"], inside, out, clean_path=clean)
+        manifest.write_text(json.dumps(identity, indent=2))
         made += 1
     return made
 
 
 def main():
+    global CACHE_DIR, OUT_DIR
+    parser = argparse.ArgumentParser(description="Render exact versioned dataset scenes")
+    parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR)
+    parser.add_argument("--output-dir", type=Path, default=OUT_DIR)
+    parser.add_argument("--site", help="Optional literal site-name fragment")
+    args = parser.parse_args()
+    CACHE_DIR, OUT_DIR = args.cache_dir, args.output_dir
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     sites = boundaries.build_sites()
+    if args.site:
+        sites = sites[sites.SITE_NAME.str.contains(args.site, regex=False)]
+        if sites.empty:
+            parser.error(f"No site matches {args.site!r}")
+    failures = 0
     print(f"{len(sites)} sites\n")
     for pos, (idx, row) in enumerate(sites.iterrows(), 1):
         bbox = boundaries.site_bbox_wgs84(sites, idx, buffer_m=200)
@@ -154,10 +149,13 @@ def main():
             print(f"[{pos}/{len(sites)}] {row['SITE_NAME'][:34]:34} "
                   f"+{n} tiles [{time.time()-t0:.0f}s]")
         except Exception as e:
+            failures += 1
             print(f"[{pos}/{len(sites)}] FAIL {row['SITE_NAME']}: "
                   f"{type(e).__name__}: {e}")
     total = len(list(OUT_DIR.glob("*.jpg")))
-    print(f"\nDone. {total} tiles in {OUT_DIR}")
+    print(f"\nDone. {total} tiles in {OUT_DIR}; {failures} failed sites")
+    if failures:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -84,6 +84,22 @@ DOCUMENTED_PLOTS_2021 = {
 }
 
 
+# West of this longitude the region's bogs are Atlantic blanket bogs
+# (Connemara, Erris, Achill); the raised-bog belt sits in the midlands to
+# the east. The two types need different handling: blanket-bog vegetation
+# (Molinia, Calluna) stays winter-brown well into May, so early-season
+# scenes mimic bare peat there, while raised bogs green up earlier and
+# their cutting season opens in April.
+BLANKET_LON_W = -9.2
+
+
+def _tag_bog_type(gdf):
+    lon = gdf.geometry.centroid.to_crs(config.WGS84).x
+    gdf["bog_type"] = ["blanket" if x < BLANKET_LON_W else "raised"
+                       for x in lon]
+    return gdf
+
+
 def _primary_region_county(county_str):
     for c in str(county_str).split(","):
         c = c.strip()
@@ -144,7 +160,7 @@ def build_sites(min_overlap=0.05, include_sac=True, sac_max_ha=1500):
     west["plots_2021"] = None
 
     if not include_sac:
-        return west.reset_index(drop=True)
+        return _tag_bog_type(west.reset_index(drop=True))
 
     sac = _raised_bog_sacs(sac_max_ha)
     # avoid duplicating a bog we already have as NHA (same footprint)
@@ -165,7 +181,7 @@ def build_sites(min_overlap=0.05, include_sac=True, sac_max_ha=1500):
     import pandas as pd
     combined = gpd.GeoDataFrame(
         pd.concat([west[cols], sac[cols]], ignore_index=True), crs=west.crs)
-    return combined.reset_index(drop=True)
+    return _tag_bog_type(combined.reset_index(drop=True))
 
 
 def site_bbox_wgs84(gdf, row_label, buffer_m=300):
