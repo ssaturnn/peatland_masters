@@ -334,10 +334,13 @@ the calibration density plot is 990 × 840 pixels.
 ## PlanetScope across the release (private map)
 
 Beyond this case study, PlanetScope was ordered for the password-protected
-view of the web map on 15 September 2026 (`scripts/23_planet_release.py`).
+view of the web map in two rounds on 15 and 16 September 2026
+(`scripts/23_planet_release.py`).
 
-**Targets.** Each bog's latest survey year, which is the year its card opens
-on, plus the NPWS-documented site-years for 2021 and 2022.
+**Targets.** The first round took each bog's latest survey year, which is the
+year its card opens on, plus the NPWS-documented site-years for 2021 and
+2022 (87 targets, `plan.json`). The second round added 2024 and 2025 for
+every bog (155 targets, `plan-2024-2025.json`).
 
 **Selection rules.** The search covered ±3 days around the exact release
 Sentinel-2 date. Frames had to be at least 50% clear and had to cover at
@@ -348,19 +351,24 @@ bounding box, to save quota.
 
 | Site-years | Count |
 |---|---:|
-| Ordered (78 latest year, 5 documented) | 83 |
-| Same day as Sentinel-2 | 50 |
-| 1 day apart | 17 |
-| 2–3 days apart | 16 |
-| Withheld: under 50% of the bog clear (UDM2) | 11 |
-| Shown in the bog card | 72 |
-| No qualifying frame | 4 |
+| Ordered and downloaded, both rounds | 233 |
+| No qualifying frame in the ±3 day window | 9 |
+| Withheld: under 50% of the bog clear (UDM2) | 21 |
+| Shown in the bog card | 218 |
 
-The four without a frame are Barroughter 2022, Raford River 2026,
-Cloonshanville 2026 and Tullaghan Bog (Roscommon) 2026. Clipped AOIs total
-574 km². The conservative quota ledger counts the full AOI once per ordered
-frame and records 719.5 km². Like the evaluation mosaics, these orders are
-not harmonised to Sentinel-2.
+The 218 tiles on the map are 212 release site-years plus the six evaluation
+ones: 64 from 2024, 77 from 2025, 68 from 2026 and nine from 2021–2023. Of
+them, 184 are from the same day as the Sentinel-2 scene, 23 are one day
+apart and 11 are two or three days apart. The nine site-years with no
+qualifying frame are Barroughter 2022, Bangor Erris 2024, Ederglen 2024,
+Glenturk More 2024, Pollatomish 2024, Tristia 2024, Raford River 2026,
+Cloonshanville 2026 and Tullaghan Bog (Roscommon) 2026.
+
+Clipped AOIs over the ordered site-years total 1,592 km². The conservative
+quota ledger, which counts the full AOI once per ordered frame, records
+1,947.3 km² against its 2,400 km² cap across both rounds
+(`outputs/planet_release/ledger.json`); all 233 orders succeeded. Like the
+evaluation mosaics, these orders are not harmonised to Sentinel-2.
 
 **Cloud screening.** Frames were selected on scene-level clear percentages,
 which do not guarantee that the bog itself is clear. Each tile is therefore
@@ -368,10 +376,12 @@ checked against Planet's own UDM2 mask. For every pixel, the clear flag comes
 from the frame that supplies that pixel in the mosaic. The tile then reports
 the clear share of the bog.
 
-- Eleven site-years fall below 50% clear and are withheld from the map. They
-  include Monivea 2026 (24% clear) and Doogort East 2026 (33%).
-- The 78 tiles shown (6 evaluation, 72 release) have a median of 100% clear.
-- Eleven of the tiles shown are between 50% and 90% clear, and the card
+- Twenty-one site-years fall below 50% clear and are withheld from the map:
+  nine from 2024, two from 2025 and ten from 2026. The cloudiest are Shankill
+  West 2026 (0% clear), Curraghlehanagh 2026 (0.1%) and Kilsallagh 2026
+  (0.4%).
+- The 218 tiles shown have a median of 100% clear, and the lowest is 51.6%.
+- Thirty-three of the tiles shown are between 50% and 90% clear, and the card
   flags them.
 
 UDM2 counts light haze as not clear, so this screen is conservative.
@@ -379,10 +389,14 @@ UDM2 counts light haze as not clear, so this screen is conservative.
 These mosaics are for visual comparison in the bog card. A swipe switches
 between the published Sentinel-2 tile and PlanetScope on the same extent.
 The frozen v3 GNG outline is recomputed on the exact release scene and
-checked against the published area. No PlanetScope detection is run outside
-Monivea. Where the frames are 1–3 days apart, the surface can differ, for
-example if turf was turned or collected in between. The swipe is therefore
-context, not a same-instant reference.
+checked against the published area. Where the frames are 1–3 days apart, the
+surface can differ, for example if turf was turned or collected in between.
+The swipe is therefore context, not a same-instant reference.
+
+The same mosaics also feed the systematic cross-sensor comparison in
+[planet-resolution.md](planet-resolution.md), which runs a calibrated 3 m
+detection on all 218 of them and measures the agreement with the frozen 10 m
+masks.
 
 ## Citation
 

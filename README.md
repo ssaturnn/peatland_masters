@@ -127,6 +127,34 @@ that can be inspected by a domain expert.
 - Report newly-exposed area per site (candidate signal for new
   cutting).
 
+### 4.5 What a detection claims
+
+The detector labels a **surface state on a date**, not an act. A candidate
+pixel is one whose spectra read as bare peat rather than vegetation, water,
+burn or cloud on the scene the release used: NDVI below a threshold set
+against the bog's own vegetated matrix, NBR > 0, SWIR and NDWI guards, and
+the v3 cloud and shadow screens. Per bog-year the figure is the season
+maximum of that area, and "newly bare" compares the last clear year with the
+first.
+
+Turf cutting is an **interpretation** of such a detection. It rests on four
+things, never on the spectra alone:
+
+- **geometry** — strips, rectangles and worked faces at the bog margin,
+  rather than diffuse patches;
+- **timing** — appearing within the cutting season;
+- **persistence** — still bare later in the season
+  (`docs/multitemporal-gng.md`) and recurring across years;
+- **records** — overlap with the NPWS-documented plots
+  (`docs/testing-and-validation.md` §3a).
+
+Bare peat also occurs without cutting: erosion hags and gullies, tracks and
+paths, exposed mineral soil, sand, intertidal mud. The guards remove some of
+these, never all. So the map, the documentation and the thesis say
+*candidate bare peat*; the accuracy assessment scores the class *bare peat*,
+not *cutting*; and any statement about illegal activity needs the
+plot-level records or a field visit.
+
 ## 5. Evaluation
 
 - **Precision / recall** against the hand-labelled ground-truth patches.
@@ -164,7 +192,9 @@ environment:
 python3 scripts/20_planet_reference.py outputs/evaluation/2026-09-13-v3-sample
 ```
 
-The tool then shows the PlanetScope close-ups as a third column. Planet
+The tool then shows the PlanetScope close-up first and largest, captioned
+with its acquisition date and the gap to the Sentinel-2 date; `--max-days`
+widens the ±3 day search when cloud leaves nothing closer. Planet
 imagery is licensed for non-commercial research only, so it stays in the
 gitignored `outputs/` and `web/private/` folders. It is shown only in the
 password-protected view of the web map (`/private/`), never on the public

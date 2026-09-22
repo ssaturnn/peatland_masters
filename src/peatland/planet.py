@@ -12,6 +12,7 @@ import rasterio
 import requests
 from pyproj import Geod, Transformer
 from rasterio.merge import merge
+from rasterio.warp import Resampling, reproject
 from shapely.geometry import Polygon, MultiPolygon, shape
 from shapely.ops import transform as transform_geom
 
@@ -96,10 +97,13 @@ def buffered_aoi(geom, crs="EPSG:2157", buffer_m=250):
     return aoi, tolerance
 
 
+MONTHLY_KM2 = 3000          # the Education & Research allowance
+
+
 def reserve_area(ledger, key, area, cap=1300):
     """Reserve full AOI area per item before a potentially ambiguous POST."""
     import math
-    if not math.isfinite(area) or area <= 0 or not 0 < cap <= 1300:
+    if not math.isfinite(area) or area <= 0 or not 0 < cap <= MONTHLY_KM2:
         raise ValueError("Invalid quota reservation")
     if key in ledger["orders"]:
         raise ValueError("Order already reserved; reconcile before retrying")
@@ -111,12 +115,12 @@ def reserve_area(ledger, key, area, cap=1300):
     return ledger["orders"][key]
 
 
-def search(s, aoi, d0):
+def search(s, aoi, d0, max_days=MAX_DAYS):
     filt = {"type": "AndFilter", "config": [
         {"type": "GeometryFilter", "field_name": "geometry", "config": aoi.__geo_interface__},
         {"type": "DateRangeFilter", "field_name": "acquired", "config": {
-            "gte": f"{d0 - dt.timedelta(days=MAX_DAYS)}T00:00:00Z",
-            "lte": f"{d0 + dt.timedelta(days=MAX_DAYS)}T23:59:59Z"}},
+            "gte": f"{d0 - dt.timedelta(days=max_days)}T00:00:00Z",
+            "lte": f"{d0 + dt.timedelta(days=max_days)}T23:59:59Z"}},
         {"type": "RangeFilter", "field_name": "cloud_cover", "config": {"lte": 0.5}}]}
     r = s.post(f"{DATA}/quick-search", json={"item_types": ["PSScene"], "filter": filt}, timeout=60)
     r.raise_for_status()
@@ -229,6 +233,31 @@ def first_frame_clear(frames):
     if clear is None:
         raise ValueError("No UDM2 frames")
     return clear, covered
+
+
+def udm2_clear(folder, item_ids, transform, shape, crs):
+    """Planet's UDM2 clear flag on a target grid, frame by frame in mosaic order.
+
+    Each pixel is taken from the first frame that covers it, matching how the
+    reflectance mosaic was merged. Returns (clear, covered), or None when a
+    frame has no UDM2 file next to it.
+    """
+    frames = []
+    for item in item_ids:
+        sr = sorted(folder.glob(f"{item}*AnalyticMS_SR*.tif"))
+        udm = sorted(folder.glob(f"{item}*udm2*.tif"))
+        if not sr or not udm:
+            return None
+        footprint = np.zeros(shape, np.uint16)
+        clear = np.zeros(shape, np.uint8)
+        with rasterio.open(sr[0]) as ds:
+            reproject(rasterio.band(ds, 1), footprint, dst_transform=transform, dst_crs=crs,
+                      dst_nodata=0, resampling=Resampling.nearest)
+        with rasterio.open(udm[0]) as ds:
+            reproject(rasterio.band(ds, 1), clear, dst_transform=transform, dst_crs=crs,
+                      dst_nodata=0, resampling=Resampling.nearest)
+        frames.append((clear == 1, footprint > 0))
+    return first_frame_clear(frames) if frames else None
 
 
 def download(s, od, dest, product="sr"):

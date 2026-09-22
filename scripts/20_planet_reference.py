@@ -109,6 +109,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run", type=Path, help="frozen evaluation run with annotation/")
     ap.add_argument("--out", type=Path, help="download directory (default: <run>/planet)")
+    ap.add_argument("--max-days", type=int, default=MAX_DAYS,
+                    help="days either side of the Sentinel-2 date to search "
+                         "(default: 3; Irish cloud often needs more)")
     args = ap.parse_args()
     s = session()
     out = args.out or args.run / "planet"
@@ -126,10 +129,10 @@ def main():
         meta, aoi = site_window(npz)
         d0 = dt.date.fromisoformat(meta["scene_date"])
         # the evaluation reference accepted 50% site cover (6 of 8 site-years)
-        choice = choose(search(s, aoi, d0), aoi, min_cover=0.5)
+        choice = choose(search(s, aoi, d0, args.max_days), aoi, min_cover=0.5)
         if choice is None:
             manifest[stem] = {"site": meta["site"], "s2_date": str(d0),
-                              "status": f"no clear downloadable PlanetScope within ±{MAX_DAYS} days"}
+                              "status": f"no clear downloadable PlanetScope within ±{args.max_days} days"}
             print(f"  {stem} {meta['site'][:28]:28} no usable PlanetScope")
             continue
         date, frames, cover = choice

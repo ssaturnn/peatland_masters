@@ -139,6 +139,15 @@ def render_chips(rows, run_dir, chips_dir):
     return made
 
 
+def planet_dates(run_dir):
+    """PlanetScope acquisition per site-year, for the 3 m chip caption."""
+    manifest = run_dir / "planet" / "manifest.json"
+    if not manifest.exists():
+        return {}
+    return {key: {"date": rec["date"], "delta_days": rec.get("delta_days")}
+            for key, rec in json.loads(manifest.read_text()).items() if rec.get("date")}
+
+
 class LabelStore:
     """labels.csv as the single source of truth, rewritten atomically."""
 
@@ -265,7 +274,8 @@ def main():
     except ValueError:
         shown = args.annotation.resolve()
     info = {"score_cmd": f"python3 scripts/14_score_points.py {shown}/accuracy_points.csv "
-                         f"--labels {shown}/labels.csv --output {shown}/accuracy.json"}
+                         f"--labels {shown}/labels.csv --output {shown}/accuracy.json",
+            "planet": planet_dates(run_dir)}
     server = ThreadingHTTPServer(("127.0.0.1", args.port),
                                  make_handler(store, chips_dir, info))
     url = f"http://localhost:{args.port}"

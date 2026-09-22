@@ -315,9 +315,19 @@ are shown next to the Sentinel-2 chips. They were ordered through Planet's
 Education and Research programme with `scripts/20_planet_reference.py`
 (Planet Team, 2026). Unlike the basemap imagery, they show the state on the
 date, at three times the resolution, which settles most bare-peat versus
-dry-grass cases. The two 2018 site-years (Moycullen, Ederglen) have no
-usable same-week PlanetScope frame. There the reference rests on the
-Sentinel-2 acquisition alone, supported by basemap context.
+dry-grass cases. Since 16 September 2026 the tool shows that chip first and
+largest, with its acquisition date and its gap to the Sentinel-2 date in the
+caption, and records PlanetScope among the evidence for every point where it
+is used. Points confirmed before that change record the evidence that was
+actually used then, which is Sentinel-2 plus basemap context.
+
+The two 2018 site-years (Moycullen, Ederglen) have no such reference. The
+search was widened to ±7 and then ±14 days: Ederglen has no downloadable
+frame at all, and the two usable frames near Moycullen cover 13% and 6% of
+its window and contain none of its 30 sampled points. PlanetScope coverage
+of these sites in 2018 is too sparse. Those 40 points therefore rest on the
+Sentinel-2 acquisition alone, supported by basemap context, and their
+evidence field says so.
 
 Limitation: where PlanetScope is missing, the reference is visual
 interpretation of the same acquisition the detectors saw. It is

@@ -24,23 +24,21 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from rasterio.transform import array_bounds
-from rasterio.warp import reproject, Resampling
-from scipy import ndimage, sparse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.dont_write_bytecode = True
 
-from peatland.gng import GrowingNeuralGas
+from peatland.cross_sensor import (
+    MIN_COVERAGE, adaptive_threshold, aggregate_labels, aggregate_to_grid,
+    area_mean_reflectance, candidate_mask, compare_masks, distribution,
+    fit_ndvi_calibration, gng_candidates, indices, narrow_features, north_up,
+    overlap_statistics, patch_statistics, project_mask, true_colour, zoom_bounds)
 
 STEM = "002352_2022"
 DATE = "2022-04-23"
 DEFAULT_RUN = Path("outputs/evaluation/2026-09-13-v3-sample")
 DEFAULT_OUT = Path("outputs/planet_case_study")
-NDVI_CAP = 0.25
-CONTRAST_DROP = 0.18       # same physical contrast rule as pipeline.py v3
-NDVI_FLOOR = 0.10
-MIN_COVERAGE = 0.95       # assessed Planet area / complete Sentinel-2 cell
 CITATION = ("Planet Team (2026). Planet Application Program Interface: In Space for Life "
             "on Earth. San Francisco, CA. https://api.planet.com")
 LIMITATIONS = [
@@ -57,222 +55,6 @@ LIMITATIONS = [
     "Opening loss is a narrow-feature proxy, including small objects and protrusions, "
     "not a measured width or cutting-area estimate; widths are quantized at 3 m.",
 ]
-
-
-def adaptive_threshold(ndvi, analysis=None):
-    """max(0.10, min(0.25, site NDVI p75 - 0.18)); ignore nonfinite data."""
-    values = np.asarray(ndvi, dtype=float)
-    if analysis is not None:
-        values = values[np.asarray(analysis, dtype=bool)]
-    values = values[np.isfinite(values)]
-    if not values.size:
-        raise ValueError("No finite site NDVI values for the adaptive threshold")
-    return float(max(NDVI_FLOOR, min(NDVI_CAP, np.quantile(values, 0.75) - CONTRAST_DROP)))
-
-
-def indices(reflectance):
-    """NDVI and green/NIR NDWI from an H x W x 4 blue/green/red/NIR stack."""
-    blue, green, red, nir = np.moveaxis(reflectance, -1, 0)
-    ndvi = (nir - red) / (nir + red + 1e-9)
-    ndwi = (green - nir) / (green + nir + 1e-9)
-    return ndvi, ndwi
-
-
-def candidate_mask(ndvi, ndwi, analysis, threshold):
-    """Low NDVI, with NDWI > 0 water excluded; strict NDVI inequality."""
-    return (np.asarray(analysis, dtype=bool) & np.isfinite(ndvi) & np.isfinite(ndwi)
-            & (ndvi < threshold) & (ndwi <= 0.0))
-
-
-def fit_ndvi_calibration(planet_ndvi, sentinel2_ndvi, planet_ndwi, sentinel2_ndwi, support):
-    """OLS S2 = a * PS10 + b on every finite, nonwater supported cell.
-
-    Inputs are matching arrays on the common 10 m grid. Planet indices must
-    be ratios of area-mean reflectance bands, not averages of native ratios.
-    No candidate labels enter the fit. Return metrics and the selected-cell
-    mask; RMSE uses n as denominator and r is Pearson correlation (undefined
-    for a constant response). Inputs are never modified.
-    """
-    x, y, xw, yw = [np.asarray(values, dtype=float) for values in
-                    (planet_ndvi, sentinel2_ndvi, planet_ndwi, sentinel2_ndwi)]
-    selected = np.asarray(support, dtype=bool).copy()
-    if any(values.shape != selected.shape for values in (x, y, xw, yw)):
-        raise ValueError("Calibration inputs must have matching shapes")
-    selected &= (np.isfinite(x) & np.isfinite(y) & np.isfinite(xw) & np.isfinite(yw)
-                 & (xw <= 0) & (yw <= 0))
-    x, y = x[selected], y[selected]
-    if x.size < 2:
-        raise ValueError("Calibration requires at least two finite nonwater paired cells")
-    xc, yc = x - x.mean(), y - y.mean()
-    xx, yy = float(xc @ xc), float(yc @ yc)
-    if np.ptp(x) == 0:
-        raise ValueError("Calibration requires varying PlanetScope NDVI")
-    xy = float(xc @ yc)
-    a = xy / xx
-    b = float(y.mean() - a * x.mean())
-    r = float(np.clip(xy / np.sqrt(xx * yy), -1, 1)) if np.ptp(y) > 0 else None
-    return {"a": a, "b": b, "r": r,
-            "rmse": float(np.sqrt(np.mean((y - (a * x + b)) ** 2))),
-            "n": int(x.size)}, selected
-
-
-def gng_candidates(reflectance, analysis, threshold, seed=42, ndvi=None):
-    """Pixel NDVI gate plus physical water labelling of learned prototypes.
-
-    Like pipeline.spectral_bare, only the water decision is learned: a
-    pixel's nearest de-standardized prototype is water if its NDWI > 0.
-    The direct pixel NDWI exclusion is also retained, so the variant can
-    only remove candidates. No centroid-NDVI gate or spatial cleanup is added.
-    """
-    native_ndvi, ndwi = indices(reflectance)
-    ndvi = native_ndvi if ndvi is None else np.asarray(ndvi)
-    if ndvi.shape != analysis.shape:
-        raise ValueError("GNG NDVI and analysis must have matching shapes")
-    raw = np.column_stack([reflectance[analysis], ndvi[analysis], ndwi[analysis]])
-    result = candidate_mask(ndvi, ndwi, analysis, threshold)
-    info = {"seed": seed, "max_nodes": 80, "training_steps": 15000,
-            "features": ["blue", "green", "red", "nir", "ndvi", "ndwi"],
-            "labelling": "pixel NDVI < threshold, pixel NDWI <= 0, prototype NDWI <= 0",
-            "sample_pixels": min(8000, len(raw)), "site_pixels": len(raw)}
-    if len(raw) < 2:
-        info.update({"fitted": False, "nodes": 0, "water_nodes": 0})
-        return result, info
-    mu, sd = raw.mean(axis=0), raw.std(axis=0) + 1e-9
-    features = (raw - mu) / sd
-    rng = np.random.default_rng(seed)
-    sample = rng.choice(len(features), size=info["sample_pixels"], replace=False)
-    net = GrowingNeuralGas(max_nodes=info["max_nodes"], rng=rng)
-    net.fit(features[sample], n_steps=info["training_steps"])
-    weights_raw = net.weights * sd + mu
-    water_nodes = weights_raw[:, 5] > 0.0
-    result[analysis] &= ~water_nodes[net.predict(features)]
-    info.update({"fitted": True, "nodes": len(net.weights),
-                 "water_nodes": int(water_nodes.sum()),
-                 "feature_mean": mu.tolist(), "feature_std_plus_epsilon": sd.tolist()})
-    return result, info
-
-
-def _north_up(transform):
-    if transform.b != 0 or transform.d != 0 or transform.a <= 0 or transform.e >= 0:
-        raise ValueError("Expected a north-up, unrotated raster grid")
-
-
-def _axis_overlap(src_start, src_step, src_size, dst_start, dst_step, dst_size):
-    """Sparse destination-by-source matrix of exact interval overlap lengths."""
-    src = src_start + np.arange(src_size) * src_step
-    dst = dst_start + np.arange(dst_size) * dst_step
-    overlap = np.maximum(0.0, np.minimum(dst[:, None] + dst_step, src + src_step)
-                         - np.maximum(dst[:, None], src))
-    return sparse.csr_matrix(overlap)
-
-
-def _grid_weights(src_shape, src_transform, dst_shape, dst_transform):
-    _north_up(src_transform)
-    _north_up(dst_transform)
-    cols = _axis_overlap(src_transform.c, src_transform.a, src_shape[1],
-                         dst_transform.c, dst_transform.a, dst_shape[1])
-    rows = _axis_overlap(-src_transform.f, -src_transform.e, src_shape[0],
-                         -dst_transform.f, -dst_transform.e, dst_shape[0])
-    return rows, cols
-
-
-def _weighted_area(values, rows, cols):
-    return cols.dot(rows.dot(np.asarray(values, dtype=float)).T).T
-
-
-def aggregate_to_grid(mask, analysis, src_transform, dst_shape, dst_transform):
-    """Exact area-weighted bare fraction and assessed coverage of each cell.
-
-    Both north-up grids must use the same projected CRS. Intersect source
-    pixel rectangles with target cells; do not round the 10/3 scale ratio.
-    Bare fraction is bare area / observed assessed area. Coverage is observed
-    assessed area / full target-cell area, including raster-edge gaps.
-    An unsupported cell has fraction NaN and coverage zero, not a negative label.
-    """
-    mask, analysis = np.asarray(mask, dtype=bool), np.asarray(analysis, dtype=bool)
-    if mask.ndim != 2 or mask.shape != analysis.shape:
-        raise ValueError("Candidate and analysis masks must be matching 2D arrays")
-    rows, cols = _grid_weights(mask.shape, src_transform, dst_shape, dst_transform)
-    support = _weighted_area(analysis, rows, cols)
-    bare = _weighted_area(mask & analysis, rows, cols)
-    fraction = np.full(dst_shape, np.nan, dtype=float)
-    np.divide(bare, support, out=fraction, where=support > 0)
-    cell_area = abs(dst_transform.a * dst_transform.e)
-    return np.clip(fraction, 0, 1), np.clip(support / cell_area, 0, 1)
-
-
-def aggregate_labels(fraction, coverage, minimum_coverage=MIN_COVERAGE):
-    """A cell is bare at fraction >= 0.5, provided it has sufficient support."""
-    supported = np.isfinite(fraction) & (coverage > 0) & (coverage >= minimum_coverage)
-    return supported & (fraction >= 0.5), supported
-
-
-def area_mean_reflectance(reflectance, analysis, src_transform, dst_shape, dst_transform):
-    """Exact area-mean bands and assessed coverage, before computing indices."""
-    reflectance = np.asarray(reflectance, dtype=float)
-    analysis = np.asarray(analysis, dtype=bool)
-    if reflectance.ndim != 3 or reflectance.shape[:2] != analysis.shape:
-        raise ValueError("Reflectance must be H x W x bands with a matching analysis mask")
-    valid = analysis & np.isfinite(reflectance).all(axis=2)
-    rows, cols = _grid_weights(analysis.shape, src_transform, dst_shape, dst_transform)
-    support = _weighted_area(valid, rows, cols)
-    mean = np.full((*dst_shape, reflectance.shape[2]), np.nan)
-    for band in range(reflectance.shape[2]):
-        total = _weighted_area(np.where(valid, reflectance[:, :, band], 0), rows, cols)
-        np.divide(total, support, out=mean[:, :, band], where=support > 0)
-    return mean, np.clip(support / abs(dst_transform.a * dst_transform.e), 0, 1)
-
-
-def patch_statistics(mask, pixel_area_m2):
-    """Eight-connected patches, with no sieve; areas and histogram in hectares."""
-    if pixel_area_m2 <= 0:
-        raise ValueError("Pixel area must be positive")
-    labels, count = ndimage.label(np.asarray(mask, dtype=bool), structure=np.ones((3, 3)))
-    sizes = np.bincount(labels.ravel())[1:] * pixel_area_m2 / 10000.0
-    edges = [0, 0.01, 0.05, 0.1, 0.5, 1, float("inf")]
-    histogram = np.histogram(sizes, bins=edges)[0]
-    return {"count": int(count), "connectivity": 8,
-            "area_ha": float(sizes.sum()), "sizes_ha": np.sort(sizes).tolist(),
-            "min_ha": float(sizes.min()) if count else None,
-            "median_ha": float(np.median(sizes)) if count else None,
-            "p90_ha": float(np.quantile(sizes, 0.9)) if count else None,
-            "max_ha": float(sizes.max()) if count else None,
-            "histogram_bins_ha": ["[0,0.01)", "[0.01,0.05)", "[0.05,0.1)",
-                                  "[0.1,0.5)", "[0.5,1)", "[1,infinity)"],
-            "histogram_counts": histogram.tolist()}
-
-
-def narrow_features(mask, transform, width_m=10.0):
-    """Area removed by opening with a 10 m diameter disk sampled on the grid.
-
-    This is a morphological proxy: native-pixel discretization makes widths
-    near 10 m ambiguous and boundary protrusions can be removed too.
-    """
-    _north_up(transform)
-    dx, dy = transform.a, -transform.e
-    radius = width_m / 2
-    xs = np.arange(-int(np.ceil(radius / dx)), int(np.ceil(radius / dx)) + 1) * dx
-    ys = np.arange(-int(np.ceil(radius / dy)), int(np.ceil(radius / dy)) + 1) * dy
-    disk = ys[:, None] ** 2 + xs[None, :] ** 2 <= radius ** 2
-    opened = ndimage.binary_opening(mask, structure=disk, border_value=0)
-    removed = mask & ~opened
-    total = int(mask.sum())
-    info = {"method": "binary opening; disk footprint uses pixel-centre distances",
-            "nominal_diameter_m": width_m, "footprint": disk.astype(int).tolist(),
-            "removed_pixels": int(removed.sum()),
-            "removed_area_ha": float(removed.sum() * dx * dy / 10000),
-            "share_of_bare_area": float(removed.sum() / total) if total else None}
-    return removed, info
-
-
-def overlap_statistics(first, second, support):
-    a, b = first & support, second & support
-    intersection, union = int((a & b).sum()), int((a | b).sum())
-    return {"support_cells": int(support.sum()), "first_cells": int(a.sum()),
-            "second_cells": int(b.sum()), "intersection_cells": intersection,
-            "union_cells": union, "iou": intersection / union if union else None,
-            "only_first_cells": int((a & ~b).sum()),
-            "only_second_cells": int((b & ~a).sum())}
 
 
 def compare_variant(rules, gng, analysis, ps_transform, s2_mask, s2_transform,
@@ -336,41 +118,6 @@ def compare_variant(rules, gng, analysis, ps_transform, s2_mask, s2_transform,
     return metrics, arrays
 
 
-def _distribution(values):
-    values = np.asarray(values)
-    values = values[np.isfinite(values)]
-    return {"pixels": len(values), **{
-        name: float(np.quantile(values, q)) if values.size else None
-        for name, q in [("p10", 0.1), ("p25", 0.25), ("median", 0.5),
-                        ("p75", 0.75), ("p90", 0.9)]}}
-
-
-def _project_mask(mask, src_transform, src_crs, dst_shape, dst_transform, dst_crs):
-    result = np.zeros(dst_shape, dtype=np.uint8)
-    reproject(mask.astype(np.uint8), result, src_transform=src_transform,
-              src_crs=src_crs, dst_transform=dst_transform, dst_crs=dst_crs,
-              resampling=Resampling.nearest, dst_nodata=0)
-    return result.astype(bool)
-
-
-def _zoom_bounds(mask, transform, width_m=400):
-    """Densest full 400 m window in the frozen mask; ties use row then column."""
-    size = min(int(round(width_m / transform.a)), *mask.shape)
-    integral = np.pad(mask.astype(np.int64), ((1, 0), (1, 0))).cumsum(0).cumsum(1)
-    counts = (integral[size:, size:] - integral[:-size, size:]
-              - integral[size:, :-size] + integral[:-size, :-size])
-    row, col = np.unravel_index(np.argmax(counts), counts.shape)
-    west, north = transform * (int(col), int(row))
-    east, south = transform * (int(col + size), int(row + size))
-    return (west, south, east, north), int(counts[row, col])
-
-
-def _true_colour(stack, valid):
-    rgb = np.clip(stack[:, :, [2, 1, 0]] / 10000.0 * 3.2, 0, 1) ** (1 / 1.4)
-    rgb[~valid] = 0.13
-    return rgb
-
-
 def write_figures(out, s2, ps, bounds, zoom, summary, calibration_pairs):
     # Keep the font cache local to the repository.
     os.environ["MPLCONFIGDIR"] = str(ROOT / ".mplcache")
@@ -384,7 +131,7 @@ def write_figures(out, s2, ps, bounds, zoom, summary, calibration_pairs):
     def panel(ax, data, window, title):
         stack, valid, analysis, mask, transform = data
         west, south, east, north = array_bounds(*mask.shape, transform)
-        ax.imshow(_true_colour(stack, valid), extent=(west, east, south, north),
+        ax.imshow(true_colour(stack, valid), extent=(west, east, south, north),
                   interpolation="nearest", origin="upper")
         xs = transform.c + (np.arange(mask.shape[1]) + 0.5) * transform.a
         ys = transform.f + (np.arange(mask.shape[0]) + 0.5) * transform.e
@@ -499,9 +246,9 @@ def run_case(run, out):
         ps_transform, ps_crs = ds.transform, ds.crs
     if ps_crs != s2_crs or not s2_crs.is_projected or s2_crs.linear_units != "metre":
         raise ValueError("Exact area aggregation requires both grids in the same projected metre CRS")
-    _north_up(ps_transform)
-    _north_up(s2_transform)
-    ps_inside = _project_mask(s2_inside, s2_transform, s2_crs, ps_valid.shape, ps_transform, ps_crs)
+    north_up(ps_transform)
+    north_up(s2_transform)
+    ps_inside = project_mask(s2_inside, s2_transform, s2_crs, ps_valid.shape, ps_transform, ps_crs)
     analysis = ps_inside & ps_valid
     s2_analysis = s2_inside & s2_valid
     s2_mask = frozen & s2_analysis
@@ -532,7 +279,7 @@ def run_case(run, out):
           f"RMSE={fit['rmse']:.9f}, n={fit['n']}", flush=True)
     print(f"Calibrated site NDVI p75={np.quantile(calibrated_ndvi[analysis], 0.75):.6f}; "
           f"threshold={threshold:.6f}; candidates={rules.sum()} pixels", flush=True)
-    frozen_on_planet = _project_mask(s2_mask, s2_transform, s2_crs,
+    frozen_on_planet = project_mask(s2_mask, s2_transform, s2_crs,
                                      analysis.shape, ps_transform, ps_crs) & analysis
     metrics, arrays = compare_variant(rules, gng, analysis, ps_transform, s2_mask,
                                       s2_transform, common, frozen_on_planet)
@@ -540,23 +287,23 @@ def run_case(run, out):
         naive_rules, naive_gng, analysis, ps_transform, s2_mask,
         s2_transform, common, frozen_on_planet)
     collocated = s2_mask & common
-    diagnostics = {"planet_site_ndvi": _distribution(ndvi[analysis]),
-                   "planet_calibrated_site_ndvi": _distribution(calibrated_ndvi[analysis]),
-                   "sentinel2_site_ndvi": _distribution(s2_ndvi[s2_analysis]),
-                   "planet_ndvi_within_frozen_sentinel2_candidates": _distribution(ndvi[frozen_on_planet]),
-                   "planet_calibrated_ndvi_within_frozen_sentinel2_candidates": _distribution(
+    diagnostics = {"planet_site_ndvi": distribution(ndvi[analysis]),
+                   "planet_calibrated_site_ndvi": distribution(calibrated_ndvi[analysis]),
+                   "sentinel2_site_ndvi": distribution(s2_ndvi[s2_analysis]),
+                   "planet_ndvi_within_frozen_sentinel2_candidates": distribution(ndvi[frozen_on_planet]),
+                   "planet_calibrated_ndvi_within_frozen_sentinel2_candidates": distribution(
                        calibrated_ndvi[frozen_on_planet]),
-                   "sentinel2_ndvi_on_common_frozen_candidates": _distribution(s2_ndvi[collocated]),
-                   "planet_ndvi_of_mean_bands_on_common_frozen_candidates": _distribution(ps_10_ndvi[collocated]),
-                   "planet_calibrated_ndvi_of_mean_bands_on_common_frozen_candidates": _distribution(
+                   "sentinel2_ndvi_on_common_frozen_candidates": distribution(s2_ndvi[collocated]),
+                   "planet_ndvi_of_mean_bands_on_common_frozen_candidates": distribution(ps_10_ndvi[collocated]),
+                   "planet_calibrated_ndvi_of_mean_bands_on_common_frozen_candidates": distribution(
                        calibrated_10_ndvi[collocated]),
-                   "paired_planet_minus_sentinel2_ndvi_on_frozen_candidates": _distribution(
+                   "paired_planet_minus_sentinel2_ndvi_on_frozen_candidates": distribution(
                        ps_10_ndvi[collocated] - s2_ndvi[collocated]),
-                   "paired_calibrated_planet_minus_sentinel2_ndvi_on_frozen_candidates": _distribution(
+                   "paired_calibrated_planet_minus_sentinel2_ndvi_on_frozen_candidates": distribution(
                        calibrated_10_ndvi[collocated] - s2_ndvi[collocated]),
                    "planet_pixels_below_threshold_within_frozen_candidates": int((rules & frozen_on_planet).sum()),
                    "planet_water_pixels_excluded": int((analysis & (ndwi > 0)).sum())}
-    zoom, zoom_count = _zoom_bounds(s2_mask, s2_transform)
+    zoom, zoom_count = zoom_bounds(s2_mask, s2_transform)
     rr, cc = np.where(s2_inside)
     west, north = s2_transform * (max(0, int(cc.min()) - 5), max(0, int(rr.min()) - 5))
     east, south = s2_transform * (min(s2_mask.shape[1], int(cc.max()) + 6),

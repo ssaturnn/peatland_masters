@@ -15,12 +15,16 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "outputs/planet_release"
 
 
-def targets(features, existing):
-    """Latest card years first, then each site's documented survey years."""
+def targets(features, existing, years=None):
+    """Latest card years first, then each site's documented survey years.
+
+    With `years`, those survey years are targeted instead, for the bogs that
+    have them: that is how earlier years are added to the private map.
+    """
     latest, documented = [], []
     for feature in features:
         p = feature["properties"]
-        for year in [p["years"][-1]] + [y for y in (2021, 2022)
+        for year in years or [p["years"][-1]] + [y for y in (2021, 2022)
                 if p.get(f"plots_{y}") is not None and y != p["years"][-1]]:
             key = f"{p['code']}_{year}"
             if key in existing or year not in p["years"]:
@@ -33,14 +37,15 @@ def targets(features, existing):
     return latest + documented
 
 
-def plan(out):
-    path = out / "plan.json"
+def plan(out, years=None, name="plan.json", cap=1300):
+    path = out / name
     if path.exists():
         return json.loads(path.read_text())
     features = json.loads((ROOT / "web/data/sites.geojson").read_text())["features"]
-    existing = json.loads((ROOT / "web/private/planet/manifest.json").read_text())["tiles"]
+    manifest = json.loads((ROOT / "web/private/planet/manifest.json").read_text())
+    existing = {**manifest["tiles"], **manifest.get("withheld", {})}
     sites = boundaries.build_sites().set_index("SITECODE")
-    rows = targets(features, existing)
+    rows = targets(features, existing, years)
     for r in rows:
         card = json.loads((ROOT / f"web/data/tiles/{r['key']}.json").read_text())
         if card["scene_id"] != r["sentinel2_scene"] or card["scene_date"] != r["s2_date"]:
@@ -48,16 +53,17 @@ def plan(out):
         aoi, tolerance = planet.buffered_aoi(sites.loc[r["code"]].geometry)
         r.update(aoi=mapping(aoi), aoi_area_km2=planet.area_km2(aoi),
                  vertices=planet.vertex_count(aoi), simplify_m=tolerance, status="unsearched")
-    result = {"version": planet.VERSION, "cap_km2": 1300, "buffer_m": 250,
+    result = {"version": planet.VERSION, "cap_km2": cap, "buffer_m": 250,
               "area_basis": "Full geodesic clip AOI per ordered frame, including overlaps",
               "harmonized": False, "existing_keys": sorted(existing), "targets": rows,
               "target_aoi_km2": sum(r["aoi_area_km2"] for r in rows), "search_complete": False}
     planet.write_json(path, result)
-    planet.write_json(out / "ledger.json", {"cap_km2": 1300, "reserved_km2": 0, "orders": {}})
+    if not (out / "ledger.json").exists():     # one cumulative quota ledger per folder
+        planet.write_json(out / "ledger.json", {"cap_km2": cap, "reserved_km2": 0, "orders": {}})
     return result
 
 
-def search_all(out, result):
+def search_all(out, result, path):
     s = planet.session()
     for r in result["targets"]:
         if r["status"] != "unsearched":
@@ -74,9 +80,11 @@ def search_all(out, result):
                      reserved_km2=r["aoi_area_km2"] * len(frames), status="available")
         else:
             r["status"] = "no_clear_coverage"
-        planet.write_json(out / "plan.json", result)
+        planet.write_json(path, result)
         print(f"{r['key']}: {r['status']} {r.get('date', '')}", flush=True)
-    used = 0
+    # the cap covers every round of orders in this folder, not just this plan
+    ledger_path = out / "ledger.json"
+    used = json.loads(ledger_path.read_text())["reserved_km2"] if ledger_path.exists() else 0
     for r in result["targets"]:
         if r["status"] in ("available", "budget_excluded"):
             if used + r["reserved_km2"] <= result["cap_km2"]:
@@ -85,7 +93,7 @@ def search_all(out, result):
             else:
                 r["status"] = "budget_excluded"
     result.update(search_complete=True, planned_order_km2=used)
-    planet.write_json(out / "plan.json", result)
+    planet.write_json(path, result)
     print(f"Complete plan: {used:.6f} km² of {result['cap_km2']} km²", flush=True)
 
 
@@ -106,7 +114,7 @@ def order_all(out, result):
                              "status": r["status"], "aoi_area_km2": r["aoi_area_km2"]}
             planet.write_json(manifest_path, manifest)
             continue
-        reservation = planet.reserve_area(ledger, key, r["reserved_km2"])
+        reservation = planet.reserve_area(ledger, key, r["reserved_km2"], cap=result["cap_km2"])
         name = f"peatland-private-release-20260915-{key}"
         reservation["name"] = name
         planet.write_json(ledger_path, ledger)
@@ -194,6 +202,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("action", choices=("plan", "order", "collect", "udm2"))
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--years", nargs="+", type=int,
+                    help="survey years to target instead of each bog's latest")
+    ap.add_argument("--plan", default="plan.json", help="plan file inside --out")
+    ap.add_argument("--cap", type=float, default=1300,
+                    help="clipped-area cap in km2 for every order in this folder")
     args = ap.parse_args()
     out = planet.private_path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -204,9 +217,9 @@ def main():
         elif args.action == "udm2":
             print(f"Missing: {fetch_udm2(out)}")
         else:
-            result = plan(out)
+            result = plan(out, args.years, args.plan, args.cap)
             if not result["search_complete"]:
-                search_all(out, result)
+                search_all(out, result, out / args.plan)
             if args.action == "order":
                 order_all(out, result)
 

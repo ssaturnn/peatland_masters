@@ -12,6 +12,7 @@
   --c-bare_peat: #c07a3a; --c-vegetated: #4caf6e; --c-water: #3b82f6;
   --c-burn: #f97316; --c-other: #a78bfa; --c-unsure: #94a3b8;
   --chip: min(calc((100vh - 176px) / 2), 22vw);
+  --ps: calc(var(--chip) * 1.45);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -41,9 +42,15 @@ kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--mu
   border: 1px solid #2f5d40; background: #14261b; }
 #done code { background: #0b0f0d; padding: 2px 6px; border-radius: 5px; font-size: 12px; }
 main { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; padding: 14px 18px; }
-.chips { display: grid; grid-template-columns: repeat(2, var(--chip)); gap: 8px 10px; align-content: start; }
-.chips.has-ps { grid-template-columns: repeat(3, var(--chip)); }
-main.has-ps { --chip: min(calc((100vh - 176px) / 2), 18.5vw); }
+.chips { display: grid; grid-template-columns: repeat(2, var(--chip)); gap: 8px 10px;
+  align-content: start; align-items: center; }
+/* PlanetScope leads the row and is shown larger: at 3 m it is what settles
+   bare peat versus dry grass, so it should be read before the 10 m chips */
+.chips.has-ps { grid-template-columns: var(--ps) var(--chip) var(--chip); }
+main.has-ps { --chip: min(calc((100vh - 176px) / 2.9), 15.5vw); }
+main.has-ps .right { height: calc(var(--ps) * 2 + 48px); }
+#f_ps_tc img, #f_ps_fc img { width: var(--ps); height: var(--ps);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 figure { margin: 0; }
 /* never let a selection highlight tint the imagery the labels depend on */
 .chips, .chips figure, .chips img { -webkit-user-select: none; user-select: none; -webkit-user-drag: none; }
@@ -105,7 +112,7 @@ figcaption { display: flex; justify-content: space-between; font-size: 12px; col
 #guide li { margin: 4px 0; }
 #guide .key img { width: 100%; display: block; border-radius: 8px; border: 1px solid var(--line); margin-top: 6px; }
 @media (max-width: 1100px) {
-  :root { --chip: min(44vw, 320px); }
+  :root { --chip: min(44vw, 320px); --ps: var(--chip); }
   main { grid-template-columns: 1fr; }
   .right { height: auto; }
   #map { height: 320px; flex: none; }
@@ -127,12 +134,12 @@ figcaption { display: flex; justify-content: space-between; font-size: 12px; col
 <div id="done" hidden></div>
 <main>
   <section class="chips">
+    <figure id="f_ps_tc" hidden><img id="ps_tc" alt="PlanetScope true colour"><figcaption><span>PlanetScope 3 m · true colour</span><span id="ps_when">same week</span></figcaption></figure>
     <figure><img id="tc_near" alt="True colour, close-up"><figcaption><span>True colour</span><span>330 m</span></figcaption></figure>
     <figure><img id="fc_near" alt="False colour, close-up"><figcaption><span>False colour · NIR / red / green</span><span>330 m</span></figcaption></figure>
-    <figure id="f_ps_tc" hidden><img id="ps_tc" alt="PlanetScope true colour, same week"><figcaption><span>PlanetScope 3 m · true colour</span><span>same week</span></figcaption></figure>
+    <figure id="f_ps_fc" hidden><img id="ps_fc" alt="PlanetScope false colour"><figcaption><span>PlanetScope 3 m · false colour</span><span>330 m</span></figcaption></figure>
     <figure><img id="tc_far" alt="True colour, context"><figcaption><span>True colour · context, white = assessed area</span><span>1.2 km</span></figcaption></figure>
     <figure><img id="fc_far" alt="False colour, context"><figcaption><span>False colour · context</span><span>1.2 km</span></figcaption></figure>
-    <figure id="f_ps_fc" hidden><img id="ps_fc" alt="PlanetScope false colour, same week"><figcaption><span>PlanetScope 3 m · false colour</span><span>330 m</span></figcaption></figure>
   </section>
   <section class="right">
     <div class="meta">
@@ -160,6 +167,8 @@ figcaption { display: flex; justify-content: space-between; font-size: 12px; col
   <h2>How to label</h2>
   <p>Label what covers the <b>yellow 10 m square</b> on the Sentinel-2 date shown. If the square is mixed,
      choose the cover that fills most of it.</p>
+  <p>When a <b>PlanetScope 3 m</b> chip is there, read it first: it is the leftmost and largest chip, from
+     within three days of the Sentinel-2 date. Then check the false colour.</p>
   <h3>Three questions, in order</h3>
   <ol>
     <li><b>Is it red or pink in false colour?</b> &rarr; <b>2 Vegetated</b>. Straw-brown heath and grass usually
@@ -180,9 +189,11 @@ figcaption { display: flex; justify-content: space-between; font-size: 12px; col
      are left out of the metrics.</p>
   <p>The high-resolution map shows <i>what kind</i> of place this is &mdash; banks, pools, tracks &mdash; but it may
      date from another year. The Sentinel-2 chips decide the state on the date.</p>
-  <p><b>PlanetScope 3 m</b> (third column, when available) is from the same week as the Sentinel-2 image: like
-     Sentinel-2 it shows the state on the date, three times sharper. Use it to settle bare peat versus dry grass:
-     smooth surfaces with straight edges are cut peat, tussocky texture is vegetation.</p>
+  <p><b>PlanetScope 3 m decides where it exists</b> (140 of the 180 points; its acquisition date is in the
+     caption). It shows the same state three times sharper than Sentinel-2, so use it for bare peat versus dry
+     grass: smooth surfaces with straight edges are cut peat, tussocky texture is vegetation. Where no
+     PlanetScope chip appears, the Sentinel-2 close-ups decide as before, and the evidence box records which
+     of the two you used.</p>
   <h3>Classes</h3>
   <dl>
     <dt><i style="background:var(--c-bare_peat)"></i>1 · Bare peat</dt>
@@ -229,6 +240,8 @@ const nameOf = (id) => (CLASSES.find((c) => c.id === id) || {}).name || id;
 const pending = (p) => /second annotator/.test(p.reference_source || "");
 
 let P = [], i = 0, map = null, mapReady = false, scoreCmd = "";
+let PLANET = {};   // site-year -> PlanetScope acquisition behind the 3 m chips
+const stemOf = (pid) => pid.replace(/_r\d+_c\d+$/, "");
 let prefs = { evidence: ["S2 true colour", "S2 false colour", "Esri World Imagery"], auto: true };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem("label-prefs") || "{}")); } catch (e) {}
 const savePrefs = () => { try { localStorage.setItem("label-prefs", JSON.stringify(prefs)); } catch (e) {} };
@@ -382,6 +395,10 @@ function setPS(on) {
   $("f_ps_tc").hidden = $("f_ps_fc").hidden = !on;
   document.querySelector(".chips").classList.toggle("has-ps", on);
   document.querySelector("main").classList.toggle("has-ps", on);
+  // a point still being decided records the evidence actually on screen
+  const box = [...document.querySelectorAll(".ev input")].find((c) => c.value === "PlanetScope");
+  const editable = !P[i] || !P[i].truth || pending(P[i]);
+  if (box && editable) box.checked = on;
   if (map) setTimeout(() => map.resize(), 0);
 }
 
@@ -394,6 +411,9 @@ function render() {
   $("coords").textContent = `${(+p.lat).toFixed(5)}, ${(+p.lon).toFixed(5)}`;
   for (const kind of KINDS) $(kind).src = `/chips/${encodeURIComponent(p.point_id)}_${kind}.png`;
   setPS(false);
+  const ps = PLANET[stemOf(p.point_id)];
+  $("ps_when").textContent = !ps ? "same week" : ps.delta_days
+    ? `${ps.date} · ${ps.delta_days > 0 ? "+" : ""}${ps.delta_days} d` : `${ps.date} · same day`;
   $("ps_tc").src = `/chips/${encodeURIComponent(p.point_id)}_ps_tc.png`;
   $("ps_fc").src = `/chips/${encodeURIComponent(p.point_id)}_ps_fc.png`;
   document.querySelectorAll(".cls").forEach((b) => b.classList.toggle("on", b.dataset.id === p.truth));
@@ -478,7 +498,7 @@ window.addEventListener("hashchange", () => {
 buildControls();
 initMap();
 fetch("/api/points").then((r) => r.json()).then((d) => {
-  P = d.points; scoreCmd = d.score_cmd || "";
+  P = d.points; scoreCmd = d.score_cmd || ""; PLANET = d.planet || {};
   if (!P.length) { $("count").textContent = "no points"; return; }
   const first = P.findIndex((p) => !p.truth || pending(p));
   i = first === -1 ? 0 : first;

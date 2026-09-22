@@ -25,7 +25,7 @@ from scipy import ndimage
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from peatland.planet import first_frame_clear, private_path, write_json
+from peatland.planet import private_path, udm2_clear, write_json
 from peatland.release_scene import exact_scene
 RUN = ROOT / "outputs" / "evaluation" / "2026-09-13-v3-sample"
 CASE = ROOT / "outputs" / "planet_case_study"
@@ -122,26 +122,6 @@ def paint(img, mask, rgb, alpha):
 def save(img, path):
     Image.fromarray(img.round().clip(0, 255).astype(np.uint8)).save(
         path, quality=85, optimize=True, progressive=True)
-
-
-def udm2_clear(folder, item_ids, transform, shape, crs):
-    """Planet's UDM2 clear flag on the tile grid, frame by frame in mosaic order."""
-    frames = []
-    for item in item_ids:
-        sr = sorted(folder.glob(f"{item}*AnalyticMS_SR*.tif"))
-        udm = sorted(folder.glob(f"{item}*udm2*.tif"))
-        if not sr or not udm:
-            return None
-        footprint = np.zeros(shape, np.uint16)
-        clear = np.zeros(shape, np.uint8)
-        with rasterio.open(sr[0]) as ds:
-            reproject(rasterio.band(ds, 1), footprint, dst_transform=transform, dst_crs=crs,
-                      dst_nodata=0, resampling=Resampling.nearest)
-        with rasterio.open(udm[0]) as ds:
-            reproject(rasterio.band(ds, 1), clear, dst_transform=transform, dst_crs=crs,
-                      dst_nodata=0, resampling=Resampling.nearest)
-        frames.append((clear == 1, footprint > 0))
-    return first_frame_clear(frames) if frames else None
 
 
 def render(key, rec, mosaic, run, out_dir, case_key, release=False):
