@@ -6,6 +6,8 @@ const METRICS = {
           stops: [0.05, 0.5, 1.5] },
   pct:  { label: "% bare now",   unit: "%",     prop: (m) => `pct_${m}`,
           stops: [0.5, 2, 5] },
+  peak: { label: "Peak bare, any year", unit: "ha", prop: (m) => `peak_${m}_ha`,
+          stops: [0.01, 2, 5] },
 };
 const COLORS = ["#357a5f", "#f2d16b", "#ef8a3c", "#e04a34"];
 
@@ -68,7 +70,7 @@ function fillExpr() {
 
 // proportional-symbol radius: area-perception (sqrt) scaled per metric so a
 // worst-in-class site reads big and a quiet one reads small, on any zoom.
-const RADIUS_REF = { new: 60, rate: 2, pct: 15 };
+const RADIUS_REF = { new: 60, rate: 2, pct: 15, peak: 60 };
 function radiusExpr(extra = 0) {
   const p = curProp(), ref = RADIUS_REF[state.metric];
   return ["+", extra, ["interpolate", ["linear"],
@@ -124,6 +126,18 @@ function passesFilter(p) {
 }
 
 const fmt = (n, d = 1) => (n === undefined || n === null) ? "–" : Number(n).toFixed(d);
+
+// NPWS plot records exist for 2021 and 2022: a documented site is judged in
+// those years, not on the first-vs-last change, which a later quiet year hides
+const DOC_YEARS = [2021, 2022];
+const docYears = (p) => DOC_YEARS.filter((y) => p[`plots_${y}`] != null);
+const gngIn = (p, y) => { const i = p.years.indexOf(y); return i < 0 ? null : p.gng_series[i]; };
+const HOTSPOT_FILTER = ["any", ...DOC_YEARS.map((y) =>
+  [">", ["coalesce", ["get", `plots_${y}`], -1], -1])];
+// coastal sites: the upper intertidal fringe is never under water on a clear
+// scene, so it survives the water exclusion and inflates the figures
+const isUpperBound = (p) => (p.water_excl_pct || 0) > 25;
+const shortName = (p) => p.name.replace(/ Bog (SAC|NHA)$/, "").replace(/ (SAC|NHA)$/, "");
 
 /* ---- sparkline (inline SVG) -------------------------------------------- */
 function sparkline(years, series, color) {
@@ -216,6 +230,13 @@ function updateYearUI() {
       ` · ${ps.instruments.join(", ")}`;
     line.classList.toggle("ps-warn", ps.clear_pct != null && ps.clear_pct < 90);
     $("card-year-read").appendChild(line);
+    if (showPS && ps.candidates) {
+      const note = document.createElement("div");
+      note.className = "ps-cite";
+      note.textContent = "Yellow: GNG on the 3 m image. PlanetScope has no SWIR band, so " +
+        "open water and burn scars can appear there; the 10 m detector rejects them.";
+      $("card-year-read").appendChild(note);
+    }
     if (showPS) {
       const cite = document.createElement("div");
       cite.className = "ps-cite";
@@ -263,9 +284,9 @@ function updatePS() {
   img.classList.toggle("show", on);
   $("swipe").classList.toggle("hidden", !on);
   stackEl.classList.toggle("comparing", on);
-  $("card-legend").innerHTML = `<span><i class="sw sw-gng"></i>GNG</span>
+  $("card-legend").innerHTML = `<span><i class="sw sw-gng"></i>GNG${on ? " 10 m" : ""}</span>
     <span><i class="sw sw-ndvi"></i>NDVI</span>` +
-    (on && ps.candidates ? `<span><i class="sw sw-ps"></i>3 m candidates</span>` : "");
+    (on && ps.candidates ? `<span><i class="sw sw-ps"></i>GNG 3 m</span>` : "");
 }
 
 function setSwipe(pct) {
@@ -363,15 +384,35 @@ function openCard(p) {
   $("year-ticks").innerHTML = p.years.map((y) => `<span>${y}</span>`).join("");
 
   const vd = $("card-valid");
-  if (p.plots_2022 != null) {
+  const dy = docYears(p);
+  if (dy.length) {
+    const found = dy.some((y) => (gngIn(p, y) ?? 0) > 0.5);
+    const perYear = dy.map((y) => {
+      const a = gngIn(p, y);
+      return `${p[`plots_${y}`]} plots in ${y}, ${a == null
+        ? "no clear scene that year" : `${fmt(a)} ha detected`}`;
+    }).join("; ");
     vd.classList.remove("hidden");
-    vd.innerHTML = `<span class="vd-icon">✓</span>
-      <span><b>NPWS-documented hotspot.</b> ${p.plots_2022} turf plots were
-      recorded here in 2022. The satellite result is ${fmt(p.newly_gng_ha)} ha
-      newly bare over ${p.span}. Plot counts and this area measure are not directly comparable.</span>`;
+    vd.classList.toggle("miss", !found);
+    vd.innerHTML = `<span class="vd-icon">${found ? "✓" : "!"}</span>
+      <span><b>NPWS-documented cutting.</b> ${perYear}.
+      ${found ? "" : "The detector finds no candidate bare peat in the documented years. "}
+      Compared in the years the plots were recorded; plot counts and hectares are
+      different measures.</span>`;
   } else {
     vd.classList.add("hidden"); vd.innerHTML = "";
   }
+
+  const notes = [];
+  if (isUpperBound(p)) notes.push(`<b>Coastal site: read these figures as an upper
+    bound.</b> Water seen on any clear scene (${fmt(p.water_excl_pct, 0)}% of the site) is
+    excluded, but the upper intertidal fringe is never under water on a clear
+    acquisition and can still pass as bare surface.`);
+  if (p.mk_trend === "decreasing") notes.push(`<b>The falling trend is partly scene
+    timing.</b> Up to 2022 most clear scenes were in April, afterwards mostly in May and
+    June, when the same surfaces read greener.`);
+  $("card-warn").innerHTML = notes.map((n) => `<p>${n}</p>`).join("");
+  $("card-warn").classList.toggle("hidden", !notes.length);
   $("card-stats").innerHTML = statTiles(p);
 
   showYear(p.years.length - 1);
@@ -406,26 +447,31 @@ function renderInsight() {
   const totalNew = FEATURES.reduce((s, f) => s + (f.properties.newly_gng_ha || 0), 0);
   const top = [...FEATURES].sort((a, b) =>
     b.properties.newly_gng_ha - a.properties.newly_gng_ha)[0];
-  const hs = FEATURES.filter((f) => f.properties.plots_2022 != null
-    && f.properties.newly_gng_ha > 0.5);
   const nUp = FEATURES.filter((f) => f.properties.mk_trend === "increasing").length;
   const nDown = FEATURES.filter((f) => f.properties.mk_trend === "decreasing").length;
+  const documented = FEATURES.map((f) => f.properties).filter((p) => docYears(p).length);
+  const found = documented.filter((p) => docYears(p).some((y) => (gngIn(p, y) ?? 0) > 0.5));
+  const missed = documented.filter((p) => !found.includes(p));
+  const ub = top && isUpperBound(top.properties);
 
-  const valid = hs.length
+  const valid = documented.length
     ? `<div class="ins-valid">
          <div class="ins-valid-hd">Sites with documented cutting</div>
-         <div class="ins-valid-body">Candidate change overlaps
-           ${hs.length} of the government-documented turf-cutting hotspots —
-           ${hs.slice(0, 3).map((f) => f.properties.name.replace(/ (Bog )?SAC.*/, ""))
-             .join(", ")} — where cutting was officially recorded.</div>
+         <div class="ins-valid-body">NPWS recorded turf plots at ${documented.length} of these
+           bogs in 2021–2022. In those years the detector finds candidate bare peat at
+           ${found.length}: ${found.map(shortName).join(", ")}.${missed.length
+             ? ` It finds none at ${missed.map(shortName).join(", ")}.` : ""}</div>
        </div>`
     : "";
+  const link = (href, text) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
 
   document.getElementById("insight").innerHTML = `
     <div class="ins-head">
       <span class="ins-big">${fmt(totalNew, 0)}<span class="ins-unit">ha</span></span>
       <span class="ins-cap">of newly bare candidate surface across
-        ${FEATURES.length} protected bogs, first vs last clear survey year</span>
+        ${FEATURES.length} protected bogs, first vs last clear survey year${ub
+          ? `. ${fmt(top.properties.newly_gng_ha, 0)} ha of it is ${top.properties.name.replace(/ NHA$/, "")},
+             a coastal site where the figure is an upper bound` : ""}</span>
     </div>
     <div class="ins-row">
       <div class="ins-cell"><b>${FEATURES.length}</b><span>bogs analysed</span></div>
@@ -434,13 +480,18 @@ function renderInsight() {
         <span>significant falling · rising trend (p&lt;0.05)</span></div>
       <div class="ins-cell"><b>${withCut.length}</b><span>have >0.5 ha newly bare</span></div>
       <div class="ins-cell"><b>${top ? fmt(top.properties.newly_gng_ha, 0) : "–"}</b>
-        <span>ha largest candidate change</span></div>
+        <span>${ub ? "ha largest change (coastal, upper bound)" : "ha largest candidate change"}</span></div>
     </div>
+    ${nDown ? `<div class="ins-note">Falling trends are partly scene timing: up to 2022 most
+      clear scenes were in April, afterwards mostly in May and June.</div>` : ""}
     ${valid}
-    <div class="ins-ctx">Up to 90% of Irish peatlands are degraded; they hold
-      two-thirds of the nation's soil carbon. Ireland was referred to the EU
-      Court of Justice (2024) over failure to stop bog destruction, yet only
-      ~18 of 57 raised-bog SACs are monitored on the ground.</div>`;
+    <div class="ins-ctx">82% of Irish peatlands are damaged to some extent
+      (${link("https://www.epa.ie/publications/research/reports/research-401-peatland-properties-influencing-greenhouse-gas-emissions-and-removal.php", "EPA, 2022")}).
+      In March 2024 the European Commission referred Ireland to the EU Court of Justice
+      for failing to protect raised- and blanket-bog SACs from turf cutting
+      (${link("https://ec.europa.eu/commission/presscorner/detail/en/ip_24_1232", "European Commission")}),
+      and NPWS monitored cutting on the ground at 28 of the 57 SACs concerned from 2016
+      (${link("https://iwt.ie/press-release-unlawful-turf-cutting/", "Irish Wildlife Trust, 2020")}).</div>`;
 }
 
 /* ---- ranking ------------------------------------------------------------ */
@@ -462,7 +513,9 @@ function renderRanking() {
           ? '<span class="tr-up" title="statistically significant rising trend">▲</span> '
           : r.p.mk_trend === "decreasing"
             ? '<span class="tr-down" title="statistically significant falling trend">▼</span> '
-            : ""}${r.p.name.replace(" NHA", "")}</div>
+            : ""}${r.p.name.replace(" NHA", "")}${isUpperBound(r.p)
+          ? ' <span class="ub" title="coastal site: the intertidal fringe can inflate this figure">upper bound</span>'
+          : ""}</div>
         <div class="rank-bar"><i style="width:${Math.max(3, 100 * r.v / max)}%;
           background:${colorFor(r.v)}"></i></div>
       </div>
@@ -478,7 +531,9 @@ function renderLegend() {
   const labels = [`< ${s[0]}`, `${s[0]}–${s[1]}`, `${s[1]}–${s[2]}`, `> ${s[2]}`];
   document.getElementById("legend").innerHTML =
     `<div class="lg-note">Circle colour &amp; size — ${M().label.toLowerCase()} (${u})
-       per bog · ◍ ring = NPWS-documented site</div>` +
+       per bog · ◍ ring = NPWS-documented site${state.metric === "peak"
+         ? " · the peak is often an April scene of 2018–2022, when dry vegetation can read as bare"
+         : ""}</div>` +
     labels.map((t, i) =>
       `<span class="lg"><span class="dot" style="background:${COLORS[i]}"></span>${t} ${u}</span>`
     ).join("");
@@ -521,7 +576,7 @@ function refresh() {
     map.setPaintProperty("bog-sel", "circle-radius", radiusExpr(5));
     map.setPaintProperty("bog-hotspot", "circle-radius", radiusExpr(4.5));
     // keep hotspot rings within the active filter too
-    const hs = [">", ["coalesce", ["get", "plots_2022"], -1], -1];
+    const hs = HOTSPOT_FILTER;
     map.setFilter("bog-hotspot", flt ? ["all", flt, hs] : hs);
   }
   renderRanking();
@@ -548,6 +603,17 @@ document.getElementById("filter-county").addEventListener("change", (e) => {
 });
 
 /* ---- load --------------------------------------------------------------- */
+function derive(p) {
+  const s = p.site_ha || 1;
+  p.pct_ndvi = Math.round(1000 * (p.bare_now_ndvi_ha || 0) / s) / 10;
+  p.pct_gng = Math.round(1000 * (p.bare_now_gng_ha || 0) / s) / 10;
+  // the largest area in any survey year: a site cut in 2021 and quiet since
+  // shows here, where the first-vs-last change hides it
+  const peak = (series) => Math.max(0, ...(series || []).filter((v) => v != null));
+  p.peak_gng_ha = peak(p.gng_series);
+  p.peak_ndvi_ha = peak(p.ndvi_series);
+}
+
 // Fetch data once; render the sidebar as soon as it arrives, independent of
 // the map's WebGL init, so ranking/detail work even if the map is slow.
 const dataPromise = fetch("data/sites.geojson")
@@ -558,6 +624,9 @@ const dataPromise = fetch("data/sites.geojson")
   .then((fc) => {
     if (fc.type !== "FeatureCollection" || !Array.isArray(fc.features))
       throw new Error("Invalid map dataset");
+    // derived metrics live on the features, so the map layers and the sidebar
+    // read the same values whichever of them initialises first
+    fc.features.forEach((f) => derive(f.properties));
     return fc;
   })
   .catch(() => {
@@ -576,9 +645,11 @@ function renderPlanetList() {
   if (!rows.length) return;
   const evalRows = rows.filter((r) => r.ps.source !== "release");
   const bogs = new Set(rows.map((r) => r.name)).size;
+  const years = rows.map((r) => r.year);
   $("planet").innerHTML = `<h2>PlanetScope 3 m <span>· within 3 days of Sentinel-2</span></h2>
     <p class="ps-hint">In the bog card for ${rows.length} bog-years on ${bogs} bogs,
-      mostly the latest year. Drag across the image to compare 10 m with 3 m.</p>
+      ${Math.min(...years)}–${Math.max(...years)}, most of them 2024–2026. Open any bog and
+      drag across the image to compare 10 m with 3 m.</p>
     <div class="ps-sub">Evaluation site-years</div>
     <ul>${evalRows.map((r) => `<li><button class="ps-item"
         data-name="${r.name.replace(/"/g, "&quot;")}" data-year="${r.year}">
@@ -606,11 +677,6 @@ const planetPromise = PRIVATE
 Promise.all([dataPromise, planetPromise]).then(([fc, planet]) => {
   if (!fc) return;
   FEATURES = fc.features;
-  FEATURES.forEach((f) => {
-    const p = f.properties, s = p.site_ha || 1;
-    p.pct_ndvi = Math.round(1000 * (p.bare_now_ndvi_ha || 0) / s) / 10;
-    p.pct_gng = Math.round(1000 * (p.bare_now_gng_ha || 0) / s) / 10;
-  });
   document.getElementById("coverage").textContent = `· ${FEATURES.length} bogs`;
   renderInsight();
   renderRanking();
@@ -658,7 +724,7 @@ whenStyleReady(async () => {
       "circle-stroke-width": 1.4,
     } });
   map.addLayer({ id: "bog-hotspot", type: "circle", source: "points",
-    filter: [">", ["coalesce", ["get", "plots_2022"], -1], -1],
+    filter: HOTSPOT_FILTER,
     paint: { "circle-radius": radiusExpr(4.5), "circle-color": "rgba(0,0,0,0)",
       "circle-stroke-color": "#0b7d63", "circle-stroke-width": 2.4,
       "circle-stroke-opacity": 0.95 } });

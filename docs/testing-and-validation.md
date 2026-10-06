@@ -329,6 +329,23 @@ of these sites in 2018 is too sparse. Those 40 points therefore rest on the
 Sentinel-2 acquisition alone, supported by basemap context, and their
 evidence field says so.
 
+**Model pre-labels for review (6 October 2026).** To speed up the review of the
+remaining points, two independent model passes labelled all 180 points blind
+(`scripts/27_model_prelabels.py`). They worked from the same chips the annotator
+sees, PlanetScope first, and never saw detector output or other labels.
+
+- The two passes agreed on 88% of points: Cohen's κ 0.84 overall, and 0.84 for
+  bare peat versus not.
+- For the 109 points still awaiting review, the agreed proposal was written into
+  the tool as a second-annotator pre-label. The 13 points where the passes
+  disagreed are flagged.
+- On the 63 points the author had already confirmed and both passes agreed on,
+  the passes matched the author on 97%.
+
+Labels the author has confirmed are never changed, and only labels the author
+confirms in the tool are scored. The pass outputs, agreement statistics and the
+review sheet are kept in `annotation/model-pass/`.
+
 Limitation: where PlanetScope is missing, the reference is visual
 interpretation of the same acquisition the detectors saw. It is
 independent of them in method, but not in data source.

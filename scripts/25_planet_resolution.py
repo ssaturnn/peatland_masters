@@ -165,7 +165,13 @@ def run_site(key, record, release, evaluation, bog_type=None, with_gng=False):
             "nodes": info.get("nodes"), "water_nodes": info.get("water_nodes")}
     arrays = {"planet_rules": rules, "planet_analysis": analysis,
               "planet_aggregated_10m": aggregated & common,
-              "sentinel2_gng": s2_mask, "comparison_support": common}
+              "sentinel2_gng": s2_mask, "comparison_support": common,
+              # the 3 m masks sit on the mosaic grid: keep it, so the map tiles
+              # can draw them without guessing the geometry
+              "planet_transform": np.array(tuple(ps["transform"]), dtype=float),
+              "crs": np.array(ps["crs"].to_string())}
+    if with_gng:
+        arrays["planet_gng"] = gng
     return summary, arrays, (s2, ps, rules, s2_mask)
 
 
@@ -352,19 +358,22 @@ def main():
     if not tiles:
         ap.error("no site-years selected")
 
-    sites, failures, examples = [], {}, {}
+    def example_data(key):
+        """Reload one site for a figure: holding every site's rasters would not fit in memory."""
+        return run_site(key, tiles[key], ROOT / args.release, ROOT / args.evaluation)[2]
+
+    sites, failures = [], {}
     for key, record in tiles.items():
         try:
-            summary, arrays, data = run_site(key, record, ROOT / args.release,
-                                             ROOT / args.evaluation,
-                                             bog_type=bog_types.get(key.split("_")[0]),
-                                             with_gng=args.gng)
+            summary, arrays, _ = run_site(key, record, ROOT / args.release,
+                                          ROOT / args.evaluation,
+                                          bog_type=bog_types.get(key.split("_")[0]),
+                                          with_gng=args.gng)
         except Exception as exc:
             failures[key] = f"{type(exc).__name__}: {exc}"
             print(f"{key}: skipped ({failures[key]})", flush=True)
             continue
         sites.append(summary)
-        examples[key] = (summary, data)
         np.savez_compressed(out / f"{key}_masks.npz", **arrays)
         iou = summary["iou"]
         print(f"{key}: 3 m {summary['planet_area_ha']:6.2f} ha · 10 m "
@@ -396,10 +405,10 @@ def main():
             ranked.sort(key=lambda s: s["iou"])
             for name, pick in [("example_agreement.png", ranked[-1]),
                                ("example_disagreement.png", ranked[0])]:
-                write_example(out, name, pick["key"], *[examples[pick["key"]][i] for i in (0, 1)])
+                write_example(out, name, pick["key"], pick, example_data(pick["key"]))
         biggest = max(sites, key=lambda s: s["planet_area_ha"])
-        write_example(out, "example_largest.png", biggest["key"],
-                      *[examples[biggest["key"]][i] for i in (0, 1)])
+        write_example(out, "example_largest.png", biggest["key"], biggest,
+                      example_data(biggest["key"]))
     print(json.dumps(totals, indent=2))
     print(f"\n{len(sites)} site-years -> {out.relative_to(ROOT)}"
           + (f"; {len(failures)} skipped" if failures else ""))

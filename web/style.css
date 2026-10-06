@@ -318,3 +318,29 @@ select { flex: 1; background: var(--panel); color: var(--ink);
 .sw-ps { background: rgba(255, 197, 61, 0.85); }
 .ps-read { color: #ffd98a; margin-top: 2px; }
 .ps-cite { font-size: 10.5px; color: var(--muted-2); margin-top: 2px; }
+
+/* ---- caveats the figures need ------------------------------------------ */
+.ins-note { font-size: 11px; color: var(--muted); line-height: 1.5; margin: -4px 0 12px; }
+.ins-ctx a { color: var(--muted); }
+.ub { font-size: 9.5px; font-weight: 600; color: #ffb86b; white-space: nowrap;
+  border: 1px solid rgba(255,184,107,0.45); border-radius: 999px; padding: 0 6px;
+  margin-left: 4px; vertical-align: 1px; }
+#card-valid.miss { background: rgba(255,122,92,0.08); border-color: rgba(255,122,92,0.35); }
+#card-valid.miss b { color: var(--hot); }
+#card-valid.miss .vd-icon { background: var(--hot); }
+#card-warn { background: rgba(255,184,107,0.08); border: 1px solid rgba(255,184,107,0.32);
+  border-radius: 11px; padding: 10px 13px; margin-bottom: 12px; font-size: 12.5px;
+  color: #f3dcc2; line-height: 1.5; }
+#card-warn p { margin: 0; }
+#card-warn p + p { margin-top: 6px; }
+#card-warn b { color: #ffb86b; }
+
+/* ---- phones: map on top, panel below it --------------------------------- */
+@media (max-width: 760px) {
+  html, body { height: auto; }
+  body { flex-direction: column; }
+  #map { order: -1; flex: none; width: 100%; height: 58vh; }
+  #sidebar { width: 100%; min-width: 0; height: auto; overflow: visible;
+    border-right: 0; border-top: 1px solid var(--line); }
+  #card { padding: 16px 14px 18px; }
+}

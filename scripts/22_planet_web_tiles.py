@@ -4,8 +4,8 @@ For every evaluation site-year with a same-day PlanetScope mosaic
 (scripts/20_planet_reference.py), renders the mosaic on the exact extent of
 the published Sentinel-2 card tile, so the card can swipe between 10 m and
 3 m. Two images per site-year, like the Sentinel-2 tiles: one with the
-frozen Sentinel-2 GNG outline (plus the calibrated 3 m candidates where the
-case study ran, scripts/21_planet_case_study.py) and a clean twin.
+frozen Sentinel-2 GNG outline and the 3 m GNG candidates of the resolution
+study (scripts/25_planet_resolution.py --gng), and a clean twin.
 
 Planet imagery is licensed for non-commercial research only, so the output
 goes to web/private/ (gitignored, served behind a password), never to the
@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from peatland.planet import private_path, udm2_clear, write_json
 from peatland.release_scene import exact_scene
 RUN = ROOT / "outputs" / "evaluation" / "2026-09-13-v3-sample"
-CASE = ROOT / "outputs" / "planet_case_study"
+STUDY = ROOT / "outputs" / "planet_resolution"
 WEB_TILES = ROOT / "web" / "data" / "tiles"
 OUT = ROOT / "web" / "private" / "planet"
 UPSAMPLE = 3                # output pixels per Sentinel-2 pixel side (3.3 m)
@@ -62,16 +62,25 @@ def read_on_grid(path, transform, shape, crs):
     return out
 
 
-def case_candidates(transform, shape, crs, s2_transform):
-    m = np.load(CASE / "masks.npz")
-    if not np.allclose(m["sentinel2_transform"], s2_transform):
-        raise ValueError("case-study masks were made on a different Sentinel-2 grid")
-    out = np.zeros(shape, np.uint8)
-    reproject(m["planet_rules"].astype(np.uint8), out,
-              src_transform=rasterio.Affine(*m["planet_transform"][:6]),
-              src_crs=str(m["crs"]), dst_transform=transform, dst_crs=crs,
-              dst_nodata=0, resampling=Resampling.nearest)
-    return out.astype(bool)
+def study_candidates(key, transform, shape, crs):
+    """The 3 m candidates of the resolution study, on the tile grid.
+
+    Returns (mask, method), preferring the GNG variant; (None, None) when the
+    study has not run on this site-year or predates the saved mosaic grid.
+    """
+    path = STUDY / f"{key}_masks.npz"
+    if not path.exists():
+        return None, None
+    with np.load(path) as m:
+        if "planet_transform" not in m.files:
+            return None, None
+        method = "gng" if "planet_gng" in m.files else "rules"
+        out = np.zeros(shape, np.uint8)
+        reproject(m[f"planet_{method}"].astype(np.uint8), out,
+                  src_transform=rasterio.Affine(*m["planet_transform"][:6]),
+                  src_crs=str(m["crs"]), dst_transform=transform, dst_crs=crs,
+                  dst_nodata=0, resampling=Resampling.nearest)
+    return out.astype(bool), method
 
 
 def check_matches_card(key, scene_id, shape):
@@ -124,7 +133,7 @@ def save(img, path):
         path, quality=85, optimize=True, progressive=True)
 
 
-def render(key, rec, mosaic, run, out_dir, case_key, release=False):
+def render(key, rec, mosaic, run, out_dir, release=False):
     if release:
         inside, gng, meta = exact_scene(key, mosaic.parent)
         transform = meta["transform"]
@@ -138,9 +147,7 @@ def render(key, rec, mosaic, run, out_dir, case_key, release=False):
     shape3 = (inside.shape[0] * UPSAMPLE, inside.shape[1] * UPSAMPLE)
     bands = read_on_grid(mosaic, t3, shape3, meta["crs"])
     valid = (bands > 0).all(axis=0)
-    cand = None
-    if key == case_key and (CASE / "masks.npz").exists():
-        cand = case_candidates(t3, shape3, meta["crs"], transform)
+    cand, cand_method = study_candidates(key, t3, shape3, meta["crs"])
     clear_pct = None
     frames = udm2_clear(mosaic.parent, [i["id"] for i in rec["items"]], t3, shape3, meta["crs"])
     if frames is not None:
@@ -165,6 +172,7 @@ def render(key, rec, mosaic, run, out_dir, case_key, release=False):
         "items": [i["id"] for i in rec["items"]],
         "sentinel2_scene": meta["scene_id"],
         "candidates": cand is not None,
+        "candidates_method": cand_method,
         "size": list(size),
         "harmonized": rec.get("harmonized", False),
         "aoi_area_km2": rec.get("aoi_area_km2"),
@@ -185,10 +193,6 @@ def main():
     args.out = private_path(args.out)
     source = args.release or args.run / "planet"
     manifest = json.loads((source / "manifest.json").read_text())
-    case_key = None
-    if (CASE / "summary.json").exists():
-        s = json.loads((CASE / "summary.json").read_text())
-        case_key = f"{s['site_code']}_{s['scene_date'][:4]}"
     args.out.mkdir(parents=True, exist_ok=True)
 
     manifest_path = args.out / "manifest.json"
@@ -211,7 +215,7 @@ def main():
             print(f"{key}: skipped ({rec.get('status', 'no mosaic')})")
             continue
         try:
-            tile = render(key, rec, mosaic, args.run, args.out, case_key, release=bool(args.release))
+            tile = render(key, rec, mosaic, args.run, args.out, release=bool(args.release))
         except Exception as exc:
             failures.append(key)
             print(f"{key}: render deferred ({type(exc).__name__}: {str(exc)[:180]})", flush=True)
