@@ -130,3 +130,16 @@ below the threshold.
 - v5 also flags burnt peat; FIRMS separates large fires only.
 - Wet peat can fall below the SWIR1 threshold.
 - The detection limit assumes linear mixing and a strip centred on the pixel.
+
+## 8. Web map release (`scripts/36_v5_release.py`)
+
+For every published bog and year 2018–2026 the map uses the clearest summer
+scene (15 June – 31 August) passing the shared gates on the release grid, maps
+v5 exposed peat and renders the card tiles (`web/data/tiles-v5/`). A summer is
+shown but left out of the bog's figures when it follows a NASA FIRMS fire
+within 500 m by up to 13 months, or when one contiguous patch covers 10 ha or
+more: turf plots are far smaller, so such a patch most likely marks a fire that
+FIRMS did not record or has not yet published (the keyless archive ends in
+2024). Per bog the map reports the peak and mean summer area, the number of
+summers with at least 0.1 ha, the change between the first and last clear
+summer and a least-squares trend.

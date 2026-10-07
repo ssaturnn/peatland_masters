@@ -10,8 +10,15 @@ const METRICS = {
           stops: [0.01, 2, 5] },
 };
 const COLORS = ["#357a5f", "#f2d16b", "#ef8a3c", "#e04a34"];
+// v5 maps exposed peat from summer SWIR; its areas are small, so its classes are finer
+const STOPS_V5 = { new: [0.1, 1, 3], rate: [0.05, 0.2, 0.5], pct: [0.05, 0.25, 1], peak: [0.1, 1, 5] };
+const METHOD_NAME = { v5: "Exposed peat · summer SWIR (v5)", gng: "GNG · spring (old)", ndvi: "NDVI · spring (old)" };
+const PEAT_C = "#ff8c00";
+const BIG_PATCH_HA = 10;  // one patch this large: most likely an unrecorded fire (left out of the figures)
+// a summer left out of a bog's figures: after a FIRMS fire, or one patch of 10 ha or more
+const flagged = (p, i) => !!((p.v5_after_fire || [])[i] || (p.v5_large_patch || [])[i]);
 
-const state = { method: "gng", metric: "new", desig: "", county: "" };
+const state = { method: "v5", metric: "peak", desig: "", county: "" };
 let FEATURES = [];
 let selectedName = null;
 
@@ -53,17 +60,19 @@ map.addControl(new maplibregl.NavigationControl(), "top-right");
 
 /* ---- helpers ------------------------------------------------------------ */
 const M = () => METRICS[state.metric];
+const stops = () => (state.method === "v5" ? STOPS_V5[state.metric] : M().stops);
+const isV5 = () => state.method === "v5";
 const curProp = () => M().prop(state.method);
 const val = (p) => p[curProp()] ?? 0;
 
 function colorFor(v) {
-  const s = M().stops;
+  const s = stops();
   return v >= s[2] ? COLORS[3] : v >= s[1] ? COLORS[2]
        : v >= s[0] ? COLORS[1] : COLORS[0];
 }
 
 function fillExpr() {
-  const s = M().stops, p = curProp();
+  const s = stops(), p = curProp();
   return ["step", ["coalesce", ["get", p], 0],
     COLORS[0], s[0], COLORS[1], s[1], COLORS[2], s[2], COLORS[3]];
 }
@@ -71,8 +80,9 @@ function fillExpr() {
 // proportional-symbol radius: area-perception (sqrt) scaled per metric so a
 // worst-in-class site reads big and a quiet one reads small, on any zoom.
 const RADIUS_REF = { new: 60, rate: 2, pct: 15, peak: 60 };
+const RADIUS_REF_V5 = { new: 5, rate: 0.6, pct: 1.5, peak: 10 };
 function radiusExpr(extra = 0) {
-  const p = curProp(), ref = RADIUS_REF[state.metric];
+  const p = curProp(), ref = (isV5() ? RADIUS_REF_V5 : RADIUS_REF)[state.metric];
   return ["+", extra, ["interpolate", ["linear"],
     ["sqrt", ["min", 1, ["/", ["max", 0, ["coalesce", ["get", p], 0]], ref]]],
     0, 5, 1, 30]];
@@ -132,6 +142,12 @@ const fmt = (n, d = 1) => (n === undefined || n === null) ? "–" : Number(n).to
 const DOC_YEARS = [2021, 2022];
 const docYears = (p) => DOC_YEARS.filter((y) => p[`plots_${y}`] != null);
 const gngIn = (p, y) => { const i = p.years.indexOf(y); return i < 0 ? null : p.gng_series[i]; };
+const v5In = (p, y) => { const i = (p.v5_years || []).indexOf(y); return i < 0 ? null : p.v5_series[i]; };
+const areaIn = (p, y) => (isV5() ? v5In(p, y) : gngIn(p, y));
+const FOUND_HA = () => (isV5() ? 0.1 : 0.5);
+// the series the card plays: summer v5 or the old spring release
+const cardYears = (p) => (isV5() ? (p.v5_years || []) : p.years);
+const tileDir = () => (isV5() ? "data/tiles-v5" : "data/tiles");
 const HOTSPOT_FILTER = ["any", ...DOC_YEARS.map((y) =>
   [">", ["coalesce", ["get", `plots_${y}`], -1], -1])];
 // coastal sites: the upper intertidal fringe is never under water on a clear
@@ -206,19 +222,64 @@ function twoLineSpark(years, gng, ndvi, idx) {
     </svg>`;
 }
 
+function oneLineSpark(years, series, idx, fire) {
+  const w = 640, h = 96, pad = 12;
+  const ymax = Math.max(...series, 0.5);
+  const x0 = years[0], x1 = years[years.length - 1];
+  const X = (i) => pad + (w - 2 * pad) * (years[i] - x0) / ((x1 - x0) || 1);
+  const Y = (v) => (h - pad) - (h - 2 * pad) * (v / ymax);
+  const path = series.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+  const dots = series.map((v, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}"
+      r="${i === idx ? 4.5 : 3}" fill="${fire[i] ? "#9aa6a0" : PEAT_C}"
+      stroke="${fire[i] ? "#ff5a3c" : "none"}" stroke-width="1.5"/>`).join("");
+  const mx = X(idx).toFixed(1);
+  return `<div><span class="lg"><i style="background:${PEAT_C}"></i>Exposed peat, ha (summer)</span>
+      ${fire.some(Boolean) ? '<span class="lg"><i style="background:#9aa6a0;outline:1.5px solid #ff5a3c"></i>left out: fire or one very large patch</span>' : ""}</div>
+    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+      <line x1="${mx}" y1="2" x2="${mx}" y2="${h - 2}" stroke="#4bd8a0" stroke-width="1.5" stroke-dasharray="3 3"/>
+      <path d="${path}" fill="none" stroke="${PEAT_C}" stroke-width="2.2"/>${dots}
+    </svg>`;
+}
+
 function updateYearUI() {
-  const p = cardP, y = p.years[yearIdx];
-  const g = p.gng_series[yearIdx], n = p.ndvi_series[yearIdx];
+  const p = cardP, ys = cardYears(p), y = ys[yearIdx];
   $("year-pill").textContent = y;
-  $("card-year-read").innerHTML =
-    `Candidate bare peat in ${y}: <b style="color:${GNG_C}">GNG ${fmt(g)}</b> ·
-     <b style="color:${NDVI_C}">NDVI ${fmt(n)}</b> ha`;
-  $("card-spark").innerHTML =
-    twoLineSpark(p.years, p.gng_series, p.ndvi_series, yearIdx);
-  if (p.dates && p.dates[yearIdx]) {
+  if (isV5()) {
+    const a = p.v5_series[yearIdx], fire = p.v5_after_fire[yearIdx];
+    const big = (p.v5_largest_patch || [])[yearIdx] || 0;
+    $("card-year-read").innerHTML =
+      `Exposed peat in summer ${y}: <b style="color:${PEAT_C}">${fmt(a, 2)} ha</b>
+       <span class="read-sub">(${fmt(100 * a / (p.site_ha || 1), 2)}% of the bog)</span>`;
+    $("card-spark").innerHTML = oneLineSpark(ys, p.v5_series, yearIdx, ys.map((_, i) => flagged(p, i)));
     const date = document.createElement("div");
-    date.textContent = `Satellite acquisition: ${p.dates[yearIdx]}`;
+    date.textContent = `Sentinel-2 acquisition: ${p.v5_dates[yearIdx]} (clearest summer scene, 15 June – 31 August)`;
     $("card-year-read").appendChild(date);
+    if (fire) {
+      const n = document.createElement("div"); n.className = "read-flag";
+      n.textContent = "After a fire recorded by NASA FIRMS: peat exposed by fire is also exposed peat, so this year is left out of the bog's figures.";
+      $("card-year-read").appendChild(n);
+    } else if (big >= BIG_PATCH_HA && p.v5_large_working) {
+      const n = document.createElement("div"); n.className = "read-flag info";
+      n.textContent = `One patch covers ${fmt(big, 1)} ha. Large patches recur here in several summers: fields of milled or machine-cut peat, i.e. large-scale peat working rather than domestic turf cutting.`;
+      $("card-year-read").appendChild(n);
+    } else if (big >= BIG_PATCH_HA) {
+      const n = document.createElement("div"); n.className = "read-flag";
+      n.textContent = `One patch covers ${fmt(big, 1)} ha. Turf plots are far smaller, so this is most likely an unrecorded fire (FIRMS has no records after 2024 yet); this summer is left out of the bog's figures.`;
+      $("card-year-read").appendChild(n);
+    }
+  } else {
+    const g = p.gng_series[yearIdx], n = p.ndvi_series[yearIdx];
+    $("card-year-read").innerHTML =
+      `Old spring detector, ${y}: <b style="color:${GNG_C}">GNG ${fmt(g)}</b> ·
+       <b style="color:${NDVI_C}">NDVI ${fmt(n)}</b> ha
+       <span class="read-sub">mostly winter-dead grass, not peat</span>`;
+    $("card-spark").innerHTML =
+      twoLineSpark(p.years, p.gng_series, p.ndvi_series, yearIdx);
+    if (p.dates && p.dates[yearIdx]) {
+      const date = document.createElement("div");
+      date.textContent = `Satellite acquisition: ${p.dates[yearIdx]}`;
+      $("card-year-read").appendChild(date);
+    }
   }
   const ps = PLANET[psKey(p, y)];
   if (ps) {
@@ -226,7 +287,7 @@ function updateYearUI() {
     line.className = "ps-read";
     // gap to the Sentinel-2 scene shown now, which can differ from the one the
     // PlanetScope tile was ordered for when a site's season window changed
-    const s2 = p.dates && p.dates[yearIdx];
+    const s2 = isV5() ? p.v5_dates[yearIdx] : p.dates && p.dates[yearIdx];
     const gap = s2 ? Math.round((Date.parse(ps.date) - Date.parse(s2)) / 864e5) : ps.delta_days;
     line.textContent = `PlanetScope 3 m: ${ps.date}` +
       (gap ? ` (${gap > 0 ? "+" : ""}${gap} d from Sentinel-2)` : " (same day)") +
@@ -253,7 +314,7 @@ function updateYearUI() {
 function showYear(idx) {
   yearIdx = idx;
   $("year-range").value = String(idx);
-  const p = cardP, y = p.years[idx];
+  const p = cardP, y = cardYears(p)[idx];
   const back = $(frontId === "card-img-a" ? "card-img-b" : "card-img-a");
   const front = $(frontId);
   const noimg = $("card-noimg");
@@ -268,14 +329,14 @@ function showYear(idx) {
   };
   back.onerror = () => { noimg.classList.remove("hidden"); };
   noimg.classList.add("hidden");
-  back.src = `data/tiles/${p.code}_${y}${showOverlay ? "" : "c"}.jpg`;
+  back.src = `${tileDir()}/${p.code}_${y}${showOverlay ? "" : "c"}.jpg`;
   updatePS();
   updateYearUI();
 }
 
 /* ---- PlanetScope swipe (private view only) ------------------------------ */
 function updatePS() {
-  const key = psKey(cardP, cardP.years[yearIdx]), ps = PLANET[key];
+  const key = psKey(cardP, cardYears(cardP)[yearIdx]), ps = PLANET[key];
   const on = !!ps && showPS;
   const btn = $("ps-btn"), img = $("card-img-ps");
   btn.classList.toggle("hidden", !ps);
@@ -288,9 +349,10 @@ function updatePS() {
   img.classList.toggle("show", on);
   $("swipe").classList.toggle("hidden", !on);
   stackEl.classList.toggle("comparing", on);
-  $("card-legend").innerHTML = `<span><i class="sw sw-gng"></i>GNG${on ? " 10 m" : ""}</span>
-    <span><i class="sw sw-ndvi"></i>NDVI</span>` +
-    (on && ps.candidates ? `<span><i class="sw sw-ps"></i>GNG 3 m</span>` : "");
+  $("card-legend").innerHTML = (isV5()
+    ? `<span><i class="sw sw-peat"></i>Exposed peat (v5)</span><span><i class="sw sw-edge"></i>Bog boundary</span>`
+    : `<span><i class="sw sw-gng"></i>GNG${on ? " 10 m" : ""}</span><span><i class="sw sw-ndvi"></i>NDVI</span>`) +
+    (on && ps.candidates && !isV5() ? `<span><i class="sw sw-ps"></i>GNG 3 m</span>` : "");
 }
 
 function setSwipe(pct) {
@@ -341,12 +403,32 @@ function togglePlay() {
   if (playTimer) { stopPlay(); return; }
   $("play-btn").classList.add("playing");
   $("play-btn").textContent = "⏸";
-  let i = yearIdx >= cardP.years.length - 1 ? 0 : yearIdx;
+  const n = cardYears(cardP).length;
+  let i = yearIdx >= n - 1 ? 0 : yearIdx;
   showYear(i);
   playTimer = setInterval(() => {
-    i = (i + 1) % cardP.years.length;
+    i = (i + 1) % n;
     showYear(i);
   }, 1000);
+}
+
+function statTilesV5(p) {
+  const one = (k, v, u, tip = "") =>
+    `<div class="tile-stat" title="${tip}"><div class="k">${k}</div>
+      <div class="vs"><span class="vg" style="color:${PEAT_C}">${v}</span><span class="u">${u}</span></div></div>`;
+  const n = (p.v5_years || []).length;
+  const fires = (p.v5_years || []).filter((_, i) => flagged(p, i)).length;
+  const big = Math.max(0, ...(p.v5_largest_patch || []).filter((v, i) => !flagged(p, i)));
+  return one("Peak exposed peat", fmt(p.peak_v5_ha, 2), "ha in one summer",
+             "Largest summer area of exposed peat, years after a recorded fire left out") +
+    one("Mean share", fmt(p.pct_v5, 2) + "%", "of the bog, all summers",
+        "Mean over the clear summers, as a share of the protected area") +
+    one("Summers with peat", `${p.v5_years_with_peat ?? 0} / ${n - fires}`, "≥ 0.1 ha exposed",
+        "Clear summers in which at least 0.1 ha of exposed peat was mapped") +
+    one("Largest single patch", fmt(big, 2), "ha", "Domestic turf plots are small; one large patch suggests fire or industrial working") +
+    (fires ? one("Summers left out", String(fires), "fire (FIRMS) or one patch ≥ 10 ha", "Peat exposed by fire is exposed peat too, so these summers are left out of the figures") : "") +
+    (p.water_excl_pct > 5
+      ? one("Water excluded", fmt(p.water_excl_pct, 0) + "%", "open or tidal water") : "");
 }
 
 function statTiles(p) {
@@ -383,24 +465,26 @@ function openCard(p) {
   $("card-meta").textContent = `${p.county} · ${fmt(p.site_ha, 0)} ha protected`;
   $("card-badges").innerHTML = badges(p.designation);
 
+  const ys = cardYears(p);
   const range = $("year-range");
-  range.max = String(p.years.length - 1);
-  $("year-ticks").innerHTML = p.years.map((y) => `<span>${y}</span>`).join("");
+  range.max = String(Math.max(0, ys.length - 1));
+  $("year-ticks").innerHTML = ys.map((y) => `<span>${y}</span>`).join("");
+  $("card-method").textContent = METHOD_NAME[isV5() ? "v5" : state.method];
 
   const vd = $("card-valid");
   const dy = docYears(p);
   if (dy.length) {
-    const found = dy.some((y) => (gngIn(p, y) ?? 0) > 0.5);
+    const found = dy.some((y) => (areaIn(p, y) ?? 0) >= FOUND_HA());
     const perYear = dy.map((y) => {
-      const a = gngIn(p, y);
+      const a = areaIn(p, y);
       return `${p[`plots_${y}`]} plots in ${y}, ${a == null
-        ? "no clear scene that year" : `${fmt(a)} ha detected`}`;
+        ? "no clear scene that year" : `${fmt(a, 2)} ha ${isV5() ? "exposed peat in summer" : "detected"}`}`;
     }).join("; ");
     vd.classList.remove("hidden");
     vd.classList.toggle("miss", !found);
     vd.innerHTML = `<span class="vd-icon">${found ? "✓" : "!"}</span>
       <span><b>NPWS-documented cutting.</b> ${perYear}.
-      ${found ? "" : "The detector finds no candidate bare peat in the documented years. "}
+      ${found ? "" : (isV5() ? "No exposed peat on the clearest summer scene of those years. " : "The detector finds no candidate bare peat in the documented years. ")}
       Compared in the years the plots were recorded; plot counts and hectares are
       different measures.</span>`;
   } else {
@@ -412,14 +496,27 @@ function openCard(p) {
     bound.</b> Water seen on any clear scene (${fmt(p.water_excl_pct, 0)}% of the site) is
     excluded, but the upper intertidal fringe is never under water on a clear
     acquisition and can still pass as bare surface.`);
-  if (p.mk_trend === "decreasing") notes.push(`<b>The falling trend is partly scene
+  if (isV5() && p.v5_large_working) notes.push(`<b>Large-scale peat working.</b> Contiguous
+    patches of 10 ha or more recur in several summers: milled or machine-cut fields inside or at
+    the edge of the protected boundary, not domestic turf banks. Whether the working is lawful
+    is not something imagery can show.`);
+  if (!isV5() && p.mk_trend === "decreasing") notes.push(`<b>The falling trend is partly scene
     timing.</b> Up to 2022 most clear scenes were in April, afterwards mostly in May and
     June, when the same surfaces read greener.`);
   $("card-warn").innerHTML = notes.map((n) => `<p>${n}</p>`).join("");
   $("card-warn").classList.toggle("hidden", !notes.length);
-  $("card-stats").innerHTML = statTiles(p);
+  if (!isV5()) notes.unshift(`<b>Old spring detector.</b> Checked against summer imagery,
+    98–100% of its spring candidates turn green: they are mostly winter-dead grass on old
+    cutover, not exposed peat. Shown for comparison; switch to v5 for exposed peat.`);
+  $("card-warn").innerHTML = notes.map((n) => `<p>${n}</p>`).join("");
+  $("card-warn").classList.toggle("hidden", !notes.length);
+  $("card-stats").innerHTML = isV5() ? statTilesV5(p) : statTiles(p);
 
-  showYear(p.years.length - 1);
+  if (!ys.length) {
+    $("card-noimg").classList.remove("hidden");
+    $("card-year-read").textContent = "No clear summer scene passed the quality checks for this bog.";
+    $("card-spark").innerHTML = "";
+  } else showYear(ys.length - 1);
   $("card-backdrop").classList.remove("hidden");
   requestAnimationFrame(() => $("card-backdrop").classList.add("open"));
 }
@@ -446,7 +543,43 @@ document.addEventListener("keydown", (e) => {
 });
 
 /* ---- headline insight --------------------------------------------------- */
+function renderInsightV5() {
+  const P = FEATURES.map((f) => f.properties);
+  const withPeat = P.filter((p) => (p.peak_v5_ha || 0) >= 0.1);
+  const documented = P.filter((p) => docYears(p).length);
+  const found = documented.filter((p) => docYears(p).some((y) => (v5In(p, y) ?? 0) >= 0.1));
+  const missed = documented.filter((p) => !found.includes(p));
+  const fires = P.reduce((s, p) => s + (p.v5_years || []).filter((_, i) => flagged(p, i)).length, 0);
+  const link = (href, text) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+  $("insight").innerHTML = `
+    <div class="ins-head">
+      <span class="ins-big">${withPeat.length}<span class="ins-unit">of ${P.length} bogs</span></span>
+      <span class="ins-cap">show exposed peat (≥ 0.1 ha) in at least one summer, 2018–2026,
+        mapped from Sentinel-2 short-wave infrared</span>
+    </div>
+    <div class="ins-row">
+      <div class="ins-cell"><b>${found.length} / ${documented.length}</b><span>bogs with NPWS-documented cutting show exposed peat in the documented summers</span></div>
+      <div class="ins-cell"><b>≥ 6 m</b><span>narrowest strip of exposed peat the method can see</span></div>
+      <div class="ins-cell"><b>${fires}</b><span>bog-summers left out: after a fire, or one patch ≥ 10 ha</span></div>
+      <div class="ins-cell"><b>${P.filter((p) => p.v5_large_working).length}</b><span>bogs with large milled or machine-cut fields in several summers</span></div>
+    </div>
+    <div class="ins-valid">
+      <div class="ins-valid-hd">Sites with documented cutting</div>
+      <div class="ins-valid-body">NPWS recorded turf plots at ${documented.length} of these bogs in
+        2021–2022. ${found.length
+          ? `Exposed peat is mapped in those summers at ${found.length}: ${found.map(shortName).join(", ")}.`
+          : "No exposed peat is mapped in those summers."}${missed.length ? ` Not at ${missed.map(shortName).join(", ")}.` : ""}
+        A plot is a few metres of cut face, so the area mapped does not count plots.</div>
+    </div>
+    <div class="ins-ctx">82% of Irish peatlands are damaged to some extent
+      (${link("https://www.epa.ie/publications/research/reports/research-401-peatland-properties-influencing-greenhouse-gas-emissions-and-removal.php", "EPA, 2022")}).
+      In March 2024 the European Commission referred Ireland to the EU Court of Justice
+      for failing to protect bog SACs from turf cutting
+      (${link("https://ec.europa.eu/commission/presscorner/detail/en/ip_24_1232", "European Commission")}).</div>`;
+}
+
 function renderInsight() {
+  if (isV5()) { renderInsightV5(); return; }
   const withCut = FEATURES.filter((f) => f.properties.newly_gng_ha > 0.5);
   const totalNew = FEATURES.reduce((s, f) => s + (f.properties.newly_gng_ha || 0), 0);
   const top = [...FEATURES].sort((a, b) =>
@@ -503,9 +636,9 @@ function renderRanking() {
   const rows = FEATURES.filter((f) => passesFilter(f.properties))
     .map((f) => ({ p: f.properties, v: val(f.properties) }))
     .sort((a, b) => b.v - a.v).slice(0, 14);
-  const max = Math.max(...rows.map((r) => r.v), M().stops[2]);
+  const max = Math.max(...rows.map((r) => r.v), stops()[2]);
   document.getElementById("rank-label").textContent =
-    `by ${M().label.toLowerCase()} (${M().unit}) · ${state.method.toUpperCase()}`;
+    `by ${M().label.toLowerCase()} (${M().unit}) · ${isV5() ? "v5, summer" : state.method.toUpperCase() + ", spring (old)"}`;
   const ol = document.getElementById("rank-list");
   if (!rows.length) { ol.innerHTML = `<div class="empty">No sites match.</div>`; return; }
   ol.innerHTML = rows.map((r, i) => `
@@ -523,7 +656,7 @@ function renderRanking() {
         <div class="rank-bar"><i style="width:${Math.max(3, 100 * r.v / max)}%;
           background:${colorFor(r.v)}"></i></div>
       </div>
-      <span class="rank-val">${fmt(r.v, state.metric === "rate" ? 2 : 1)}</span>
+      <span class="rank-val">${fmt(r.v, state.metric === "rate" || isV5() ? 2 : 1)}</span>
     </li>`).join("");
   ol.querySelectorAll(".rank-item").forEach((li) =>
     li.addEventListener("click", () => selectByName(li.dataset.name, true)));
@@ -531,12 +664,13 @@ function renderRanking() {
 
 /* ---- legend ------------------------------------------------------------- */
 function renderLegend() {
-  const s = M().stops, u = M().unit;
+  const s = stops(), u = M().unit;
   const labels = [`< ${s[0]}`, `${s[0]}–${s[1]}`, `${s[1]}–${s[2]}`, `> ${s[2]}`];
   document.getElementById("legend").innerHTML =
     `<div class="lg-note">Circle colour &amp; size — ${M().label.toLowerCase()} (${u})
-       per bog · ◍ ring = NPWS-documented site${state.metric === "peak"
-         ? " · the peak is often an April scene of 2018–2022, when dry vegetation can read as bare"
+       per bog, ${isV5() ? "exposed peat in summer (v5)" : "old spring detector"} · ◍ ring =
+       NPWS-documented site${!isV5() && state.metric === "peak"
+         ? " · the peak is often an April scene, when dry vegetation reads as bare"
          : ""}</div>` +
     labels.map((t, i) =>
       `<span class="lg"><span class="dot" style="background:${COLORS[i]}"></span>${t} ${u}</span>`
@@ -585,6 +719,9 @@ function refresh() {
   }
   renderRanking();
   renderLegend();
+  if (FEATURES.length) renderInsight();
+  document.body.classList.toggle("old-method", !isV5());
+  if (cardP && !$("card-backdrop").classList.contains("hidden")) openCard(cardP);
 }
 
 /* ---- controls ----------------------------------------------------------- */
@@ -616,6 +753,19 @@ function derive(p) {
   const peak = (series) => Math.max(0, ...(series || []).filter((v) => v != null));
   p.peak_gng_ha = peak(p.gng_series);
   p.peak_ndvi_ha = peak(p.ndvi_series);
+  // v5: summers after a recorded fire are left out of every figure
+  const ys = p.v5_years || [], vs = p.v5_series || [], fire = p.v5_after_fire || [];
+  const clean = ys.map((y, i) => [y, vs[i]]).filter((_, i) => !flagged(p, i));
+  p.peak_v5_ha = p.v5_peak_ha ?? peak(clean.map((c) => c[1]));
+  p.pct_v5 = p.v5_mean_pct ?? 0;
+  p.newly_v5_ha = clean.length > 1 ? Math.round(100 * (clean[clean.length - 1][1] - clean[0][1])) / 100 : 0;
+  if (clean.length > 2) {   // least-squares slope, ha per year
+    const mx = clean.reduce((s, c) => s + c[0], 0) / clean.length;
+    const my = clean.reduce((s, c) => s + c[1], 0) / clean.length;
+    const num = clean.reduce((s, c) => s + (c[0] - mx) * (c[1] - my), 0);
+    const den = clean.reduce((s, c) => s + (c[0] - mx) ** 2, 0);
+    p.rate_v5_ha_yr = den ? Math.round(1000 * num / den) / 1000 : 0;
+  } else p.rate_v5_ha_yr = 0;
 }
 
 // Fetch data once; render the sidebar as soon as it arrives, independent of
@@ -663,7 +813,7 @@ function renderPlanetList() {
   $("planet").querySelectorAll(".ps-item").forEach((b) => b.addEventListener("click", () => {
     showPS = true;
     selectByName(b.dataset.name, true);
-    const i = cardP.years.indexOf(Number(b.dataset.year));
+    const i = cardYears(cardP).indexOf(Number(b.dataset.year));
     if (i >= 0 && i !== yearIdx) showYear(i);
   }));
 }
@@ -694,7 +844,7 @@ Promise.all([dataPromise, planetPromise]).then(([fc, planet]) => {
   const [hash, year] = decodeURIComponent(location.hash.replace(/^#/, "")).split("|");
   if (hash && FEATURES.some((f) => f.properties.name === hash)) {
     selectByName(hash, false);
-    const i = cardP.years.indexOf(Number(year));
+    const i = cardYears(cardP).indexOf(Number(year));
     if (i >= 0 && i !== yearIdx) showYear(i);
   }
 });
@@ -743,8 +893,17 @@ whenStyleReady(async () => {
 
   const pick = (e) => selectByName(e.features[0].properties.name, false);
   map.on("click", "bog-circles", pick);
-  map.on("mouseenter", "bog-circles", () => map.getCanvas().style.cursor = "pointer");
-  map.on("mouseleave", "bog-circles", () => map.getCanvas().style.cursor = "");
+  const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "hover-tip" });
+  map.on("mousemove", "bog-circles", (e) => {
+    map.getCanvas().style.cursor = "pointer";
+    const p = FEATURES.find((f) => f.properties.name === e.features[0].properties.name)?.properties;
+    if (!p) return;
+    const doc = docYears(p).length ? `<div class="tip-doc">NPWS-documented cutting</div>` : "";
+    tip.setLngLat(e.lngLat).setHTML(`<b>${p.name}</b>
+      <div>${M().label}: ${fmt(val(p), isV5() ? 2 : 1)} ${M().unit}</div>${doc}
+      <div class="tip-hint">Click to open the bog card</div>`).addTo(map);
+  });
+  map.on("mouseleave", "bog-circles", () => { map.getCanvas().style.cursor = ""; tip.remove(); });
 
   refresh();
 });

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Peatland turf-cutting monitor — West of Ireland</title>
-  <meta name="description" content="Sentinel-2 monitor of candidate bare peat in 82 protected bogs in Galway, Mayo and Roscommon, 2018–2026. MSc research prototype." />
+  <meta name="description" content="Exposed peat in 82 protected bogs in Galway, Mayo and Roscommon, mapped from Sentinel-2 short-wave infrared, 2018–2026. MSc research prototype." />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Peatland turf-cutting monitor — West of Ireland" />
   <meta property="og:description" content="Candidate bare peat in 82 protected Irish bogs from Sentinel-2, 2018–2026, with the evidence behind every figure." />
@@ -23,6 +23,36 @@
         PlanetScope 3 m imagery (research licence)</p>
     </header>
 
+    <section class="help">
+      <details open>
+        <summary>How to read this map</summary>
+        <ul>
+          <li><b>Each circle is one protected bog.</b> Size and colour show the measure picked
+            below; green is little or none, red is the most. A dark ring marks a bog where
+            NPWS recorded turf cutting in 2021–2022.</li>
+          <li><b>Exposed peat</b> is bare peat with no vegetation on top: cut turf banks, turf
+            spread to dry, milled or stripped peat, peat bared by fire.</li>
+          <li><b>Click a bog</b> to open its card: the summer image of each year with exposed
+            peat filled orange, a year slider and play button, and the figures behind them.</li>
+          <li>Hover a circle for its value; filter by legal status or county.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>What changed in October 2026</summary>
+        <p>The map now uses <b>detector v5</b>: exposed peat is recognised by its short-wave
+          infrared (SWIR) signature on one clear <b>summer</b> scene per year.</p>
+        <p>The earlier detector looked for low NDVI on <b>spring</b> scenes. Checked against
+          summer imagery, almost all of what it found turned green: it was winter-dead grass on
+          old cutover, while real exposed peat (NDVI about 0.4) was rejected. On industrial
+          peat fields used as a control it found under 1% of the exposed peat; v5 finds most of it.</p>
+        <p>Fire also exposes peat. Summers after a fire recorded by NASA FIRMS, and summers
+          with one contiguous patch of 10 ha or more (far larger than any turf plot, so most
+          likely an unrecorded fire), are shown in the bog card but left out of its figures.
+          Figures are research results under review.</p>
+        <p class="help-old">The old spring detector stays available under <i>Detector</i> for comparison.</p>
+      </details>
+    </section>
+
     <section id="insight"></section>
 
     <section id="planet" class="hidden"></section>
@@ -31,17 +61,19 @@
       <div class="ctl">
         <label>Detector</label>
         <div class="seg" id="method">
-          <button data-v="gng" class="on">GNG</button>
-          <button data-v="ndvi">NDVI</button>
+          <button data-v="v5" class="on" title="Exposed peat from short-wave infrared on one clear summer scene per year">Exposed peat · v5</button>
+          <button data-v="gng" title="Old spring detector (GNG clustering). Mostly winter-dead grass; kept for comparison">GNG (old)</button>
+          <button data-v="ndvi" title="Old spring NDVI threshold. Mostly winter-dead grass; kept for comparison">NDVI (old)</button>
         </div>
+        <p class="old-banner">Old spring detector: its candidates are mostly dead grass, not peat.</p>
       </div>
       <div class="ctl">
         <label>Colour &amp; rank by</label>
         <div class="seg" id="metric">
-          <button data-v="new" class="on">Newly bare</button>
-          <button data-v="rate">Rate/yr</button>
-          <button data-v="pct">% bare</button>
-          <button data-v="peak" title="Largest candidate bare area in any survey year">Peak</button>
+          <button data-v="peak" class="on" title="Largest area in any one year">Peak</button>
+          <button data-v="pct" title="Share of the bog: mean over the years for v5, the latest year for the old detector">% area</button>
+          <button data-v="new" title="Last clear year minus the first">Change</button>
+          <button data-v="rate" title="Straight-line trend over the clear years, ha per year">Trend/yr</button>
         </div>
       </div>
       <div class="ctl row">
@@ -69,12 +101,12 @@
       <div id="legend"></div>
       <p><a href="data/sites.geojson" download="peatland-results.geojson">Download mapped results (GeoJSON)</a></p>
       <p id="private-link"><a href="/private/">PlanetScope 3 m view (password)</a></p>
-      <p class="disclaimer">Each year is sampled in a fixed cutting-season
-        window and reports the largest candidate bare-peat area among the
-        evaluated clear Sentinel-2 scenes. Detections are candidates from
-        unsupervised multi-spectral clustering (GNG) with an NDVI baseline;
-        confirming active cutting needs field / high-resolution validation.
-        MSc research prototype.</p>
+      <p class="disclaimer">v5 maps exposed peat on the clearest Sentinel-2 scene between
+        15 June and 31 August of each year (rule: SWIR2 above NIR, bright SWIR1, a SWIR ratio
+        that separates fresh burns, and no water). It sees strips of exposed peat about 6 m
+        wide or more; a season's retreat of a cut face (1–2 m) is below that. Exposed peat is
+        evidence of disturbance, not proof of illegal cutting. MSc research prototype;
+        contains modified Copernicus Sentinel data.</p>
     </footer>
   </aside>
 
@@ -88,6 +120,7 @@
         <div class="card-hd-main">
           <h2 id="card-name"></h2>
           <p id="card-meta"></p>
+          <p id="card-method" class="card-method"></p>
         </div>
         <div id="card-badges"></div>
       </header>
@@ -105,10 +138,7 @@
           </div>
         </div>
         <div id="card-noimg" class="card-noimg hidden">Image unavailable for this year</div>
-        <div class="card-legend" id="card-legend">
-          <span><i class="sw sw-gng"></i>GNG</span>
-          <span><i class="sw sw-ndvi"></i>NDVI</span>
-        </div>
+        <div class="card-legend" id="card-legend"></div>
         <button id="ovl-btn" class="ovl-on" title="Toggle detection overlays">Overlays: on</button>
         <button id="ps-btn" class="hidden" title="Compare with same-day PlanetScope 3 m imagery">PlanetScope 3 m</button>
         <div class="year-pill" id="year-pill"></div>

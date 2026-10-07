@@ -1,10 +1,11 @@
 # peatland_masters
 
-**Current work (9 September 2026):** the approved peatland-monitoring topic is
-fixed and approximately one month remains. See [the completion plan](docs/completion-plan.md)
-for the current scope, radiometry correction, reproducible evaluation commands and
-remaining reference-label work. Historical area examples and timelines below
-predate these corrections. Existing deployed results require a versioned rebuild.
+**Current state (8 October 2026).** Exposed peat is detected from its short-wave
+infrared signature on summer Sentinel-2 scenes (detector v5,
+[docs/v5-swir-peat.md](docs/v5-swir-peat.md)). The earlier spring NDVI/GNG
+detector mostly found winter-dead grass and is kept for comparison only. The web
+map shows v5 by default. Reference labels are provisional until the author has
+reviewed them. `make all` reproduces the evaluation tables offline.
 
 **Working title.** Satellite-based detection of industrial turf-cutting in
 legally-protected Irish peatlands.
