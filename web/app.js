@@ -224,8 +224,12 @@ function updateYearUI() {
   if (ps) {
     const line = document.createElement("div");
     line.className = "ps-read";
+    // gap to the Sentinel-2 scene shown now, which can differ from the one the
+    // PlanetScope tile was ordered for when a site's season window changed
+    const s2 = p.dates && p.dates[yearIdx];
+    const gap = s2 ? Math.round((Date.parse(ps.date) - Date.parse(s2)) / 864e5) : ps.delta_days;
     line.textContent = `PlanetScope 3 m: ${ps.date}` +
-      (ps.delta_days ? ` (${ps.delta_days} d from Sentinel-2)` : " (same day)") +
+      (gap ? ` (${gap > 0 ? "+" : ""}${gap} d from Sentinel-2)` : " (same day)") +
       (ps.clear_pct != null ? ` · ${Math.round(ps.clear_pct)}% of the bog clear` : "") +
       ` · ${ps.instruments.join(", ")}`;
     line.classList.toggle("ps-warn", ps.clear_pct != null && ps.clear_pct < 90);
@@ -667,7 +671,7 @@ function renderPlanetList() {
 if (PRIVATE) {
   $("private-note").classList.remove("hidden");
   $("private-link").innerHTML =
-    `<a href="/private/briefing/">Research briefing</a> · <a href="/">Public map</a>`;
+    `<a href="/private/findings/">Findings (RU/EN)</a> · <a href="/private/briefing/">Research briefing</a> · <a href="/">Public map</a>`;
 }
 const planetPromise = PRIVATE
   ? fetch("/private/planet/manifest.json")

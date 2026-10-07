@@ -1,5 +1,8 @@
 """Load and filter NPWS protected-site boundaries."""
 
+import csv
+from pathlib import Path
+
 import geopandas as gpd
 
 from . import config
@@ -91,12 +94,36 @@ DOCUMENTED_PLOTS_2021 = {
 # scenes mimic bare peat there, while raised bogs green up earlier and
 # their cutting season opens in April.
 BLANKET_LON_W = -9.2
+# East of that line the upland bogs (Slieve Aughty, the Arigna mountains) are
+# blanket bogs too. Raised bogs are lowland: in every one in the region the
+# 90th percentile of elevation is 123 m or less (Copernicus DEM); the upland
+# bogs reach 150 m or more, including those that climb a slope from lower
+# ground (Derryoober, median 103 m).
+UPLAND_M = 130
+ELEVATION_CSV = Path(__file__).with_name("site_elevation.csv")
+
+
+def _site_elevations(path=ELEVATION_CSV):
+    """90th-percentile elevation (m) per site code, from scripts/30_site_elevation.py."""
+    if not path.exists():
+        return {}
+    with path.open(newline="", encoding="utf-8") as f:
+        return {r["SITECODE"]: float(r["elev_p90_m"])
+                for r in csv.DictReader(f) if r["elev_p90_m"]}
+
+
+def bog_type(lon, elev_m=None):
+    """'blanket' west of BLANKET_LON_W or above UPLAND_M, else 'raised'."""
+    if lon < BLANKET_LON_W or (elev_m is not None and elev_m >= UPLAND_M):
+        return "blanket"
+    return "raised"
 
 
 def _tag_bog_type(gdf):
     lon = gdf.geometry.centroid.to_crs(config.WGS84).x
-    gdf["bog_type"] = ["blanket" if x < BLANKET_LON_W else "raised"
-                       for x in lon]
+    elev = _site_elevations()
+    gdf["bog_type"] = [bog_type(x, elev.get(code))
+                       for x, code in zip(lon, gdf["SITECODE"])]
     return gdf
 
 

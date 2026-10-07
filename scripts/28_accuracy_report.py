@@ -36,8 +36,11 @@ from peatland.uncertainty import bootstrap_intervals
 
 PENDING_MARK = "second annotator"
 DISAGREE_MARK = "[model disagree"
-SCOPES = {"all site-years": None, "held-out": "held-out", "calibration": "calibration"}
-NAMES = {"ndvi": "NDVI threshold", "rules": "Spectral rules", "kmeans": "K-means", "gng": "GNG"}
+SCOPES = {"all site-years": None, "held-out": "held-out", "calibration": "calibration",
+          "test": "test", "industrial": "industrial", "protected": "protected", "external": "external"}
+NAMES = {"ndvi": "NDVI threshold", "rules": "Spectral rules", "kmeans": "K-means", "gng": "GNG",
+         "v4_rules": "Spectral rules v4", "v4_kmeans": "K-means v4", "v4_gng": "GNG v4",
+         "v5": "SWIR peat v5"}
 
 
 def read_csv(path):
@@ -70,9 +73,9 @@ def usable(rows):
     return kept
 
 
-def score(rows, replicates):
-    report = score_points(rows)
-    intervals = (bootstrap_intervals(rows, replicates=replicates)
+def score(rows, replicates, methods=METHODS):
+    report = score_points(rows, method_names=methods)
+    intervals = (bootstrap_intervals(rows, method_names=methods, replicates=replicates)
                  if report["weighting_available"] else {"status": "unavailable"})
     return report, intervals
 
@@ -95,6 +98,32 @@ def strict(rows, contested):
     """The strict reading: contested interior bands count as not bare peat."""
     return [r | {"truth": "vegetated"} if r["point_id"] in contested and r["truth"] == "bare_peat"
             else r for r in rows]
+
+
+SUMMER_CHECK = ROOT / "outputs/evaluation/summer-check.json"
+
+
+def summer_checked(rows, path=SUMMER_CHECK):
+    """Bare-peat labels whose pixel is green the following summer count as vegetated.
+
+    Exposed peat does not grow a full canopy within a season; winter-brown
+    vegetation does (scripts/31_summer_check.py). Returns the relabelled rows
+    and how many labels changed, or (None, 0) without a summer check.
+    """
+    if not path.exists():
+        return None, 0
+    data = json.loads(path.read_text())
+    green = data["green_ndvi"]
+    ndvi = {p["point_id"]: p["summer_ndvi"] for p in data["points"]}
+    out, changed = [], 0
+    for r in rows:
+        v = ndvi.get(r["point_id"])
+        if r["truth"] == "bare_peat" and v is not None and v >= green:
+            out.append(r | {"truth": "vegetated"})
+            changed += 1
+        else:
+            out.append(r)
+    return out, changed
 
 
 def sample_metrics(rows, method):
@@ -140,7 +169,7 @@ def markdown(result):
                   f"{block['bare_peat']} bare peat)", "",
                   "| Method | Precision | Recall | F1 | Weighted precision | Weighted recall | Weighted F1 |",
                   "|---|---:|---:|---:|---:|---:|---:|"]
-        for m in METHODS:
+        for m in result["methods"]:
             s = block["report"]["methods"].get(m, {})
             sm, wm = s.get("sample") or {}, s.get("weighted") or {}
             iv = block["intervals"]
@@ -175,6 +204,19 @@ def markdown(result):
                 a, b = both["inclusive"], both["strict"]
                 lines.append(f"| {scope} | {NAMES.get(m, m)} | {pct(a['precision'])} / {pct(a['recall'])} / "
                              f"{pct(a['f1'])} | {pct(b['precision'])} / {pct(b['recall'])} / {pct(b['f1'])} |")
+    if result.get("summer"):
+        sm = result["summer"]
+        lines += ["", "## Summer-checked reading", "",
+                  f"{sm['changed']} bare-peat labels sit on pixels that are green (NDVI >= 0.50) "
+                  "in the same year's summer Sentinel-2 median (scripts/31_summer_check.py). Exposed "
+                  "peat does not grow a canopy within a season, so this reading counts them as "
+                  "vegetation that was winter-brown on the spring date.", "",
+                  "| Scope | Method | As labelled P / R / F1 | Summer-checked P / R / F1 |", "|---|---|---|---|"]
+        for scope, methods in sm["scopes"].items():
+            for m, both in methods.items():
+                a, b = both["as_labelled"], both["summer_checked"]
+                lines.append(f"| {scope} | {NAMES.get(m, m)} | {pct(a['precision'])} / {pct(a['recall'])} / "
+                             f"{pct(a['f1'])} | {pct(b['precision'])} / {pct(b['recall'])} / {pct(b['f1'])} |")
     if result.get("two_date"):
         td = result["two_date"]
         lines += ["", f"## Two-date detector on its support ({td['points']} points, "
@@ -192,23 +234,31 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run", type=Path, help="frozen evaluation run with annotation/")
     ap.add_argument("--replicates", type=int, default=2000)
+    ap.add_argument("--points", type=Path,
+                    help="points CSV with prediction columns (default: annotation/accuracy_points.csv)")
+    ap.add_argument("--methods", nargs="+", default=list(METHODS),
+                    help="prediction_<method> columns to score (keep gng for the error breakdown)")
+    ap.add_argument("--tag", default="", help="suffix for the output file names")
     args = ap.parse_args()
     ann = args.run / "annotation"
-    rows = join(read_csv(ann / "accuracy_points.csv"), read_csv(ann / "labels.csv"))
+    methods = tuple(args.methods)
+    rows = join(read_csv(args.points or ann / "accuracy_points.csv"), read_csv(ann / "labels.csv"))
     provenance = Counter(r["provenance"] for r in rows)
     status = "provisional" if provenance.get("model") or provenance.get("none") else "final"
 
     scopes = {}
     for name, role in SCOPES.items():
         subset = usable([r for r in rows if role is None or r["role"] == role])
-        report, intervals = score(subset, args.replicates)
+        if not subset:
+            continue
+        report, intervals = score(subset, args.replicates, methods)
         scopes[name] = {"points": len(subset),
                         "bare_peat": sum(r["truth"] == "bare_peat" for r in subset),
                         "provenance": dict(Counter(r["provenance"] for r in subset)),
                         "report": report, "intervals": intervals}
 
     all_usable = usable(rows)
-    errors = {m: error_breakdown(all_usable, m) for m in METHODS}
+    errors = {m: error_breakdown(all_usable, m) for m in methods}
 
     def sample_gng(subset):
         s = score_points(subset)["methods"].get("gng", {}).get("sample") or {}
@@ -217,7 +267,7 @@ def main():
     sensitivity = {
         "all labels (as reported above)": sample_gng(all_usable),
         "without points the model passes disagreed on": sample_gng(
-            usable([r for r in rows if not r["notes"].startswith(DISAGREE_MARK)])),
+            usable([r for r in rows if DISAGREE_MARK not in r["notes"]])),
         "author-confirmed labels only": sample_gng(
             usable([r for r in rows if r["provenance"] == "author"])),
     }
@@ -228,28 +278,41 @@ def main():
     if contested:
         for name, role in SCOPES.items():
             subset = [r for r in rows if role is None or r["role"] == role]
+            if not subset:
+                continue
             readings[name] = {m: {"inclusive": sample_metrics(subset, m),
                                   "strict": sample_metrics(strict(subset, contested), m)}
-                              for m in METHODS}
+                              for m in methods}
+    summer_rows, summer_changed = summer_checked(rows)
+    summer = None
+    if summer_rows is not None:
+        summer = {"changed": summer_changed, "scopes": {}}
+        for name, role in SCOPES.items():
+            pair = [(a, b) for a, b in zip(rows, summer_rows) if role is None or a["role"] == role]
+            if pair:
+                summer["scopes"][name] = {m: {"as_labelled": sample_metrics([a for a, _ in pair], m),
+                                              "summer_checked": sample_metrics([b for _, b in pair], m)}
+                                          for m in methods}
     two_date = None
     trajectory_csv = ROOT / "outputs/multitemporal_gng/accuracy_points_trajectory.csv"
     if trajectory_csv.exists():
         extra = {r["point_id"]: r for r in read_csv(trajectory_csv)}
         support = [r | {k: v for k, v in extra[r["point_id"]].items() if k.startswith("prediction_traj")}
                    for r in rows if str(extra.get(r["point_id"], {}).get("prediction_trajectory_gng", "")) in ("0", "1")]
-        two_date = {"points": len(support),
+        two_date = None if not support else {"points": len(support),
                     "site_years": sorted({f"{r['site'].split(' Bog')[0]} {r['year']}" for r in support}),
                     "methods": {m: {"inclusive": sample_metrics(support, m),
                                     "strict": sample_metrics(strict(support, contested), m)}
                                 for m in ("gng", "trajectory_gng", "trajectory_rules")}}
     NAMES.update(trajectory_gng="Two-date GNG", trajectory_rules="Two-date rules")
-    result = {"status": status, "provenance": dict(provenance), "scopes": scopes,
+    result = {"status": status, "methods": list(methods),
+              "provenance": dict(provenance), "scopes": scopes,
               "errors": errors, "sensitivity": sensitivity,
-              "contested": sorted(contested), "readings": readings, "two_date": two_date,
+              "contested": sorted(contested), "readings": readings, "two_date": two_date, "summer": summer,
               "assumptions": ["Unsure points are excluded and each stratum's sample size is "
                               "recounted, assuming they are missing at random within the stratum.",
                               "Weighted estimates apply to the sampled site-years only."]}
-    suffix = "provisional" if status == "provisional" else "final"
+    suffix = ("provisional" if status == "provisional" else "final") + args.tag
     (ann / f"accuracy.{suffix}.json").write_text(json.dumps(result, indent=2, default=str))
     (ann / f"accuracy.{suffix}.md").write_text(markdown(result))
     print(markdown(result))

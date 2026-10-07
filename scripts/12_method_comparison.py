@@ -130,6 +130,8 @@ def main():
                         help="Release cache whose exact scenes, grid and tidal mask are evaluated")
     parser.add_argument("--held-out", action="append", default=[], metavar="SITE",
                         help="Site-name fragment never inspected while tuning thresholds")
+    parser.add_argument("--role", choices=("calibration", "held-out", "test"),
+                        help="record this role for every case (e.g. an independent test sample)")
     args = parser.parse_args()
     cases = [(n, int(y), "user-selected control") for n, y in args.case] if args.case else CASES
     args.output_dir.mkdir(parents=True, exist_ok=False)
@@ -161,7 +163,7 @@ def main():
         else:
             stack, order, valid, inside, transform, metadata = load_case(
                 sites, name, year, with_metadata=True, cache_dir=args.cache_dir)
-            metadata["role"] = "held-out" if name in args.held_out else "calibration"
+            metadata["role"] = args.role or ("held-out" if name in args.held_out else "calibration")
         ndvi_arr = detect.ndvi(stack[:, :, order.index("red")], stack[:, :, order.index("nir")])
         methods = {
             "ndvi": lambda: pipeline.ndvi_bare(stack, order, ndvi_arr, valid, inside),

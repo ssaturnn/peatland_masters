@@ -32,6 +32,9 @@ def main():
                         help="gng: detected/undetected by GNG. agreement: adds a "
                              "'disagreement' stratum (GNG=0 but another method=1), so the "
                              "pixels where the methods differ are sampled directly")
+    parser.add_argument("--stratify-by", default="gng",
+                        help="prediction whose detected/undetected split defines the strata "
+                             "(gng, or v5 for bundles that store prediction_v5)")
     args = parser.parse_args()
     if args.per_stratum < 1:
         parser.error("--per-stratum must be positive")
@@ -51,10 +54,11 @@ def main():
         with np.load(bundle, allow_pickle=False) as data:
             valid = data["inside"] & data["valid"]
             predictions = {m: data[f"prediction_{m}"].astype(bool)
-                           for m in ("ndvi", "rules", "kmeans", "gng")}
+                           for m in ("ndvi", "rules", "kmeans", "gng", "v5")
+                           if f"prediction_{m}" in data}
             transform = rasterio.Affine(*meta["transform"][:6])
             to_wgs = Transformer.from_crs(meta["crs"], config.WGS84, always_xy=True)
-            gng = predictions["gng"]
+            gng = predictions[args.stratify_by]
             if args.strata == "agreement":
                 others = predictions["ndvi"] | predictions["rules"] | predictions["kmeans"]
                 strata = (("detected", valid & gng),
@@ -95,6 +99,7 @@ def main():
         writer.writeheader(); writer.writerows(rows)
     (out / "locations.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": locations}))
     (out / "manifest.json").write_text(json.dumps({"seed": args.seed, "per_stratum": args.per_stratum, "strata": args.strata,
+                                                  "stratify_by": args.stratify_by,
                                                   "source_run": str(args.run.resolve()), "sources": sources}, indent=2))
     print(f"{len(rows)} points written to {out}")
     print("Label labels.csv independently: bare_peat / vegetated / water / burn / other / unsure.")
