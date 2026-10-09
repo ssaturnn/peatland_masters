@@ -59,7 +59,8 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 
 /* ---- helpers ------------------------------------------------------------ */
-const M = () => METRICS[state.metric];
+const V5_LABEL = { new: "Change in exposed peat", rate: "Exposed-peat trend", pct: "Mean share exposed", peak: "Peak exposed peat, one summer" };
+const M = () => (state.method === "v5" ? { ...METRICS[state.metric], label: V5_LABEL[state.metric] } : METRICS[state.metric]);
 const stops = () => (state.method === "v5" ? STOPS_V5[state.metric] : M().stops);
 const isV5 = () => state.method === "v5";
 const curProp = () => M().prop(state.method);
@@ -469,7 +470,7 @@ function openCard(p) {
   const range = $("year-range");
   range.max = String(Math.max(0, ys.length - 1));
   $("year-ticks").innerHTML = ys.map((y) => `<span>${y}</span>`).join("");
-  $("card-method").textContent = METHOD_NAME[isV5() ? "v5" : state.method];
+  if ($("card-method")) $("card-method").textContent = METHOD_NAME[isV5() ? "v5" : state.method];
 
   const vd = $("card-valid");
   const dy = docYears(p);

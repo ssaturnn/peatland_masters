@@ -81,8 +81,14 @@ def create_app(web: Path = WEB) -> FastAPI:
 
     @app.middleware("http")
     async def private_area(request: Request, call_next):
-        if not request.scope["path"].startswith(PRIVATE_PREFIX):
-            return await call_next(request)
+        path = request.scope["path"]
+        if not path.startswith(PRIVATE_PREFIX):
+            response = await call_next(request)
+            # the page, script and styles change together on every release:
+            # make browsers revalidate them so a cached page never meets a new script
+            if path == "/" or path.endswith((".html", ".js", ".css", ".geojson")):
+                response.headers["Cache-Control"] = "no-cache"
+            return response
         if not authorised(request.headers.get("authorization")):
             return Response(status_code=401, headers={
                 "WWW-Authenticate": 'Basic realm="Peatland private", charset="UTF-8"'})
