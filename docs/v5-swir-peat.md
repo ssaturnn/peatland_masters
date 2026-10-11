@@ -109,9 +109,7 @@ Clearest summer scene per SAC in 2021 and 2022 (46 site-years):
 
 One-sided Mann–Whitney p = 0.0008 (0.0008 after removing site-years within
 13 months of a FIRMS fire). The v3 GNG finds nothing in summer on either group.
-The largest undocumented value, Cloonmoylan 2021 (39 ha), follows a fire on
-31 May 2020 recorded by FIRMS: burnt peat is exposed peat too, so v5 maps it;
-the FIRMS record separates it. The v5 area does not scale with the plot count
+The largest undocumented value, Cloonmoylan 2021 (39 ha), follows a fire on 31 May 2020, but the dense time series (`docs/timing-and-fire.md`) shows the 2021 signal equally on burnt and unburnt bog: a dry spell, not the fire. The v5 area does not scale with the plot count
 (Spearman ρ −0.47, n 7, p 0.29): a plot is a few metres of face, and the area
 seen depends on how the turf is spread.
 
