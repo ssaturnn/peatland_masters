@@ -376,3 +376,37 @@ body.old-method .card-method { color: #ff9a86; }
 .tip-doc { color: var(--accent); font-size: 11px; }
 .tip-hint { color: var(--muted-2); font-size: 10.5px; margin-top: 2px; }
 .read-flag.info { background: rgba(88,182,255,0.12); border-color: rgba(88,182,255,0.4); color: #cfe7ff; }
+
+/* ---- compare this summer: the same bog in several images ---------------- */
+.compare { margin: 6px 0 14px; }
+.compare-hd { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline;
+  font-size: 12.5px; margin-bottom: 8px; }
+.compare-hd span { color: var(--muted-2); font-size: 11px; }
+.compare-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.cmp { margin: 0; cursor: zoom-in; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.cmp:hover, .cmp:focus-visible { border-color: var(--accent); outline: none; }
+.cmp-img { aspect-ratio: var(--ar, 1); background: #0a1c16; display: grid; place-items: center; }
+.cmp-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.cmp-img .cmp-miss { color: var(--muted-2); font-size: 11px; padding: 8px; text-align: center; }
+.cmp figcaption { padding: 6px 8px 7px; font-size: 11.5px; line-height: 1.35; }
+.cmp figcaption b { display: block; color: var(--ink); font-size: 12px; }
+.cmp figcaption span { color: var(--muted); }
+.cmp figcaption .warn { color: #ffb86b; }
+.cmp-key { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--muted); margin-top: 8px; }
+.cmp-key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+.lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(4, 14, 10, 0.94);
+  display: flex; flex-direction: column; padding: 12px 16px 14px; }
+.lb-bar { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.lb-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.lb-tabs button, #lb-close { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.lb-tabs button[aria-pressed="true"] { background: var(--accent); color: #062018; border-color: var(--accent); }
+.lb-tabs kbd { font: inherit; opacity: 0.6; margin-right: 4px; }
+.lb-stage { flex: 1; min-height: 0; display: grid; place-items: center; margin-top: 10px; }
+.lb-stage { position: relative; }
+/* every layer fills the same box, so switching keeps each spot in place */
+.lb-stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.lb-cap { margin: 8px 0 0; text-align: center; font-size: 12.5px; color: var(--muted); }
+.lb-cap b { color: var(--ink); }

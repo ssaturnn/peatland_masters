@@ -17,6 +17,23 @@ const PEAT_C = "#ff8c00";
 const BIG_PATCH_HA = 10;  // one patch this large: most likely an unrecorded fire (left out of the figures)
 // a summer left out of a bog's figures: after a FIRMS fire, or one patch of 10 ha or more
 const flagged = (p, i) => !!((p.v5_after_fire || [])[i] || (p.v5_large_patch || [])[i]);
+// bogs studied on every clear scene (scripts/38-41, docs/timing-and-fire.md)
+const CASE_NOTES = {
+  "001244": `<b>When the working happened.</b> On all 276 clear Sentinel-2 scenes of 2017–2026,
+    90–100% of the 47 ha of fields were exposed at the peak of every season up to 2023, 75% in
+    2024, at most half in 2025 and a third in 2026: worked every season up to 2023, much less
+    since. Landsat shows the fields already on its earliest clear scene (1988), so the start of
+    working predates the archive. The value of a single year is the weather on that day: after
+    rain wet peat drops out of v5 (94% of the fields exposed on 13 Aug 2022, 6% three days and
+    17 mm of rain later).`,
+  "002381": `<b>Fire of 22 April 2019 (FIRMS).</b> On every clear scene after it, v5 flags 39–52%
+    of the 66 ha burn as exposed peat at 12–15 days, 2–16% at 6–9 weeks, and none from about
+    4 months. Peat bared by fire is exposed for weeks; worked peat is exposed every season.`,
+  "000248": `<b>Fire of 31 May 2020 (FIRMS), then a dry 2021.</b> Two days after the fire the
+    SWIR ratio of the 279 ha burn is 1.11, so v5 does not count fresh char as peat; it regrew in
+    2–4 months. In 2021 v5 flags the burnt and unburnt parts of the bog alike: that summer's
+    signal is drought, not the fire.`,
+};
 
 const state = { method: "v5", metric: "peak", desig: "", county: "" };
 let FEATURES = [];
@@ -333,7 +350,90 @@ function showYear(idx) {
   back.src = `${tileDir()}/${p.code}_${y}${showOverlay ? "" : "c"}.jpg`;
   updatePS();
   updateYearUI();
+  renderCompare();
 }
+
+/* ---- compare this summer: the same bog in several images ---------------- */
+// PLANET_V5: PlanetScope ordered for the v5 summer scene (scripts/46_compare_tiles.py)
+let PLANET_V5 = {}, cmpLayers = [], lbIdx = 0;
+
+function compareLayers(p, i) {
+  const y = p.v5_years[i], d = p.v5_dates[i], base = `${tileDir()}/${p.code}_${y}`;
+  const layers = [
+    { label: "Natural colour", sub: `Sentinel-2 · 10 m · ${d}`, src: `${base}c.jpg` },
+    { label: "Short-wave infrared", sub: "Sentinel-2 · SWIR2, NIR, red · same scene", src: `${base}s.jpg`,
+      note: "Dry exposed peat pink-red, wet peat dark red-brown, vegetation green, water black." },
+    { label: "v5 exposed peat", sub: `${fmt(p.v5_series[i], 2)} ha in orange · same scene`, src: `${base}.jpg` },
+  ];
+  if (!PRIVATE) return layers;
+  const gap = (date) => Math.round((Date.parse(date) - Date.parse(d)) / 864e5);
+  const gapText = (g) => (g ? `${g > 0 ? "+" : ""}${g} d from Sentinel-2` : "same day");
+  const v = PLANET_V5[`${p.code}_${y}`], old = PLANET[psKey(p, y)];
+  if (v) {
+    layers.push({ label: "PlanetScope · 3 m", sub: `${v.date} · ${gapText(gap(v.date))}`,
+      src: `/private/planet-v5/${p.code}_${y}.jpg`, planet: true });
+  } else if (old) {
+    const g = gap(old.date);
+    layers.push({ label: "PlanetScope · 3 m", sub: `${old.date} · ${gapText(g)}`,
+      warn: Math.abs(g) > 10 ? "another season: wetness and grass differ" : "",
+      src: `/private/planet/${psKey(p, y)}_psc.jpg`, planet: true });
+  } else {
+    layers.push({ label: "PlanetScope · 3 m", sub: "no PlanetScope frame for this summer", src: null, planet: true });
+  }
+  return layers;
+}
+
+function renderCompare() {
+  const box = $("card-compare");
+  if (!isV5() || !cardP || !(cardP.v5_years || []).length) { box.classList.add("hidden"); return; }
+  cmpLayers = compareLayers(cardP, yearIdx);
+  const grid = $("compare-grid");
+  grid.innerHTML = cmpLayers.map((l, k) => `
+    <figure class="cmp" tabindex="0" data-k="${k}" title="Enlarge (key ${k + 1})">
+      <div class="cmp-img">${l.src ? `<img src="${l.src}" alt="${l.label}" draggable="false">`
+        : `<div class="cmp-miss">${l.sub}</div>`}</div>
+      <figcaption><b>${k + 1} · ${l.label}</b><span>${l.src ? l.sub : ""}</span>${
+        l.warn ? `<span class="warn"> · ${l.warn}</span>` : ""}</figcaption>
+    </figure>`).join("") +
+    `<div class="cmp-key" style="grid-column:1/-1">
+      <span><i style="background:#e0607a"></i>SWIR: dry exposed peat</span>
+      <span><i style="background:#5e2a33"></i>SWIR: wet peat</span>
+      <span><i style="background:#3ccf4e"></i>SWIR: vegetation</span>
+      <span><i style="background:#ff8c00"></i>v5 exposed peat</span>
+      ${cmpLayers.some((l) => l.planet && l.src) ? `<span>PlanetScope: ${PLANET_CITE}</span>` : ""}
+    </div>`;
+  const first = grid.querySelector("img");
+  if (first) first.onload = () => grid.style.setProperty("--ar", `${first.naturalWidth} / ${first.naturalHeight}`);
+  box.classList.remove("hidden");
+}
+
+function showLightbox(k) {
+  if (!cmpLayers[k] || !cmpLayers[k].src) return;
+  lbIdx = k;
+  const l = cmpLayers[k];
+  $("lb-tabs").innerHTML = cmpLayers.map((x, j) =>
+    `<button data-k="${j}" aria-pressed="${j === k}" ${x.src ? "" : "disabled"}><kbd>${j + 1}</kbd>${x.label}</button>`).join("");
+  $("lb-img").src = l.src; $("lb-img").alt = l.label;
+  $("lb-cap").innerHTML = `<b>${cardP.name}, ${cardP.v5_years[yearIdx]}</b> · ${l.label} · ${l.sub}` +
+    (l.warn ? ` · <span style="color:#ffb86b">${l.warn}</span>` : "") +
+    (l.note ? `<br>${l.note}` : "") + (l.planet ? `<br>Imagery: ${PLANET_CITE}` : "");
+  $("lightbox").classList.remove("hidden");
+}
+const lightboxOpen = () => !$("lightbox").classList.contains("hidden");
+const closeLightbox = () => $("lightbox").classList.add("hidden");
+
+$("compare-grid").addEventListener("click", (e) => {
+  const f = e.target.closest(".cmp"); if (f) showLightbox(+f.dataset.k);
+});
+$("compare-grid").addEventListener("keydown", (e) => {
+  const f = e.target.closest(".cmp");
+  if (f && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); e.stopPropagation(); showLightbox(+f.dataset.k); }
+});
+$("lb-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (b && !b.disabled) showLightbox(+b.dataset.k);
+});
+$("lb-close").addEventListener("click", closeLightbox);
+$("lightbox").addEventListener("click", (e) => { if (e.target.id === "lightbox" || e.target.classList.contains("lb-stage")) closeLightbox(); });
 
 /* ---- PlanetScope swipe (private view only) ------------------------------ */
 function updatePS() {
@@ -501,6 +601,7 @@ function openCard(p) {
     patches of 10 ha or more recur in several summers: milled or machine-cut fields inside or at
     the edge of the protected boundary, not domestic turf banks. Whether the working is lawful
     is not something imagery can show.`);
+  if (isV5() && CASE_NOTES[p.code]) notes.push(CASE_NOTES[p.code]);
   if (!isV5() && p.mk_trend === "decreasing") notes.push(`<b>The falling trend is partly scene
     timing.</b> Up to 2022 most clear scenes were in April, afterwards mostly in May and
     June, when the same surfaces read greener.`);
@@ -537,6 +638,19 @@ $("card-backdrop").addEventListener("click", (e) => {
   if (e.target.id === "card-backdrop") closeCard();
 });
 document.addEventListener("keydown", (e) => {
+  if (lightboxOpen()) {
+    if (e.key === "Escape") closeLightbox();
+    else if (/^[1-9]$/.test(e.key)) showLightbox(+e.key - 1);
+    else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      const n = cmpLayers.length, step = e.key === "ArrowRight" ? 1 : -1;
+      for (let j = 1; j <= n; j++) {
+        const k = (lbIdx + step * j + n * n) % n;
+        if (cmpLayers[k].src) { showLightbox(k); break; }
+      }
+    }
+    e.preventDefault();
+    return;
+  }
   if (e.key === "Escape") closeCard();
   else if (e.key === " " && !$("card-backdrop").classList.contains("hidden")) {
     e.preventDefault(); togglePlay();
@@ -722,7 +836,13 @@ function refresh() {
   renderLegend();
   if (FEATURES.length) renderInsight();
   document.body.classList.toggle("old-method", !isV5());
-  if (cardP && !$("card-backdrop").classList.contains("hidden")) openCard(cardP);
+  if (cardP && !$("card-backdrop").classList.contains("hidden")) {
+    // re-render the open card for the new method, staying on the year shown
+    const y = cardYears(cardP)[yearIdx];
+    openCard(cardP);
+    const i = cardYears(cardP).indexOf(y);
+    if (i >= 0 && i !== yearIdx) showYear(i);
+  }
 }
 
 /* ---- controls ----------------------------------------------------------- */
@@ -828,6 +948,9 @@ const planetPromise = PRIVATE
   ? fetch("/private/planet/manifest.json")
       .then((r) => (r.ok ? r.json() : null)).catch(() => null)
   : Promise.resolve(null);
+if (PRIVATE) fetch("/private/planet-v5/manifest.json")
+  .then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  .then((m) => { if (m && m.tiles) PLANET_V5 = m.tiles; });
 
 Promise.all([dataPromise, planetPromise]).then(([fc, planet]) => {
   if (!fc) return;
