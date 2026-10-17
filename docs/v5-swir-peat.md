@@ -1,7 +1,8 @@
 # Exposed peat has a short-wave infrared signature (detector v5)
 
-Status: 8 October 2026. Reference labels are model pre-labels (two blind passes)
-pending author review; figures are provisional.
+Status: 17 October 2026. Reference labels are the majority of five blind
+model-assisted passes (section 4, `scripts/48_multipass_consensus.py`); they
+have not been reviewed point by point by the author.
 
 ## 1. Why the v1–v4 detectors failed
 
@@ -66,18 +67,27 @@ four industrial site-years not used for calibration (west Mountdillon summer
 2018 and spring 2020; south Mountdillon summer 2022 and spring 2024) and eight
 protected raised-bog SACs in summer (six with NPWS-documented cutting in that
 year, two controls). 272 points stratified by v5, PlanetScope within 4 days of
-every Sentinel-2 scene, two blind labelling passes (agreement 94.5%,
-κ 0.88).
+every Sentinel-2 scene.
+
+Reference labels: five blind passes by three different models (passes A–C one
+model, D and E two others), each labelling every point from the same chips
+without seeing the other passes or any prediction. The label is the majority;
+an unsure vote abstains. Fleiss' κ 0.76 over the five passes (0.77 for bare
+peat against the rest), pairwise Cohen's κ 0.67–0.88; 210 of 272 points
+unanimous, 247 with at least four of five votes. Against the earlier two-pass
+proposal, 8 points changed bare-peat status (7 of them earlier unsure).
 
 | Scope | Method | Precision | Recall | F1 |
 |---|---|---:|---:|---:|
-| Industrial (92 points) | v5 | 87% | 91% | 89% |
+| Industrial (95 points) | v5 | 88% | 89% | 88% |
 | Industrial | NDVI, rules, K-means, GNG | – | 0% | 0% |
-| Protected, summer (172 points) | v5 | 54% | 100% | 70% |
+| Protected, summer (176 points) | v5 | 54% | 100% | 70% |
 | Protected, summer | NDVI, rules, K-means, GNG | – | 0% | 0% |
 
-Weighted (Olofsson) estimates are in
-`annotation/accuracy.provisional_v5.md`. The protected recall of 100% means no
+On the points with at least four of five votes: industrial F1 92% (87 points),
+protected 70% (160 points). Weighted (Olofsson) estimates are in
+`annotation/accuracy.provisional_v5_5pass.md`; the two-pass figures (industrial
+F1 89%) are in `accuracy.provisional_v5.md`. The protected recall of 100% means no
 undetected sample point was labelled bare peat; with 12 undetected points per
 site it is not a precise estimate.
 
@@ -90,12 +100,13 @@ cut-over strips; PlanetScope was hazy at Corliskea and Cloonchambers.
 
 A second group of production bogs south of Athlone (area BNMX), added after v5
 was frozen, about 30 km from the calibration area: summer 2018 and spring
-2023, 60 points stratified by v5, PlanetScope within 4 days, two blind passes
-(agreement 96.7%, κ 0.94).
+2023, 60 points stratified by v5, PlanetScope within 4 days, five blind passes
+as above (Fleiss' κ 0.89; 0.93 for bare peat against the rest; 54 of 60
+unanimous). One point changed status against the two-pass proposal.
 
 | Method | Precision | Recall | F1 |
 |---|---:|---:|---:|
-| v5 | 93% | 93% | 93% |
+| v5 | 93% | 90% | 92% |
 | NDVI, rules, K-means, GNG | – | 0% | 0% |
 
 ## 5. Survey of the raised-bog SACs (`scripts/35_v5_survey.py`)
@@ -123,8 +134,9 @@ below the threshold.
 
 ## 7. Limitations
 
-- Reference labels are model pre-labels; the author should confirm at least
-  the bare-peat points.
+- Reference labels come from five blind model-assisted passes, not from field
+  survey or point-by-point expert review; agreement between passes is reported
+  above.
 - v5 also flags burnt peat; FIRMS separates large fires only.
 - Wet peat can fall below the SWIR1 threshold.
 - The detection limit assumes linear mixing and a strip centred on the pixel.
