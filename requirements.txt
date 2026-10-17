@@ -8,11 +8,17 @@ pyproj>=3.6
 # Satellite imagery access (STAC, cloud-optimised GeoTIFF reads)
 pystac-client>=0.7
 planetary-computer>=1.0
-rioxarray>=0.15
 
 # Classification
 scikit-learn>=1.4
 
-# Utilities
+# Utilities and figures
 requests>=2.31
 scipy>=1.10
+matplotlib>=3.8
+Pillow>=10.0
+
+# Tests (tests/test_web_private.py starts the web server in-process)
+pytest>=8.0
+fastapi>=0.115
+httpx>=0.27

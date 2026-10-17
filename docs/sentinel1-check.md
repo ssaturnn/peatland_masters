@@ -34,7 +34,7 @@ Script: `scripts/43_sentinel1_check.py`. Outputs in `outputs/time-series/`:
   ρ +0.53 (p 6e-12, n 149); intact bog ρ +0.30. Wet bare peat backscatters
   strongly and dry milled peat weakly. Against the v5 field share on
   Sentinel-2 scenes within 2 days: field VV ρ −0.59, fields − intact VV
-  ρ −0.59, VH ρ −0.57 (n 74, p < 1e-7). Radar and SWIR record the same
+  ρ −0.59, VH ρ −0.57 (n 74, p ≤ 1.1e-7). Radar and SWIR record the same
   wetting and drying of the fields.
 - **Separating fields from intact bog: VH, not VV.** Per-pixel
   April–September medians, AUC of fields against intact bog (0.5 = no
@@ -70,7 +70,7 @@ Script: `scripts/43_sentinel1_check.py`. Outputs in `outputs/time-series/`:
 | 12–15 months | +0.99 | +0.49 |
 | VH burnt − unburnt, before → 4–12 months | +0.06 → +1.5 to +1.7 | −1.06 → −0.6 to −0.9 |
 
-- **VV over the burn rises 1–2.7 dB above its pre-fire contrast within days**
+- **VV over the burn rises 0.8–2.0 dB above its pre-fire contrast within days, and up to 2.7 dB over the following year**
   (Doogort: +2.0 dB 3 days after; Cloonmoylan: +0.8 dB the day after) and
   **stays raised for more than a year**. At both sites the difference is still
   more than 2 standard deviations from the pre-fire level 15 months later.
@@ -92,7 +92,7 @@ Script: `scripts/43_sentinel1_check.py`. Outputs in `outputs/time-series/`:
 2. **Moisture:** radar does not remove the moisture problem. It is itself
    dominated by moisture (field VV against rain ρ +0.53), with the sign
    opposite to SWIR. Conditioning on dry days still shows the decline.
-3. **Fire:** clear and long-lived. A burn raises VV by 1–2.7 dB for about a
+3. **Fire:** clear and long-lived. A burn raises VV by 0.8–2.7 dB for about a
    year, far longer than the optical signal. This makes radar useful to flag
    past fires that the optical record or FIRMS missed. It does not show
    whether a fire smouldered below the surface.

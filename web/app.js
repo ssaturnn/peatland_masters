@@ -21,7 +21,7 @@ const flagged = (p, i) => !!((p.v5_after_fire || [])[i] || (p.v5_large_patch || 
 const CASE_NOTES = {
   "001244": `<b>When the working happened.</b> On all 276 clear Sentinel-2 scenes of 2017–2026,
     90–100% of the 47 ha of fields were exposed at the peak of every season up to 2023, 75% in
-    2024, at most half in 2025 and a third in 2026: worked every season up to 2023, much less
+    2024, about half in 2025 and about a third in 2026: worked every season up to 2023, much less
     since. Landsat shows the fields already on its earliest clear scene (1988), so the start of
     working predates the archive. The value of a single year is the weather on that day: after
     rain wet peat drops out of v5 (94% of the fields exposed on 13 Aug 2022, 6% three days and
@@ -39,8 +39,8 @@ const state = { method: "v5", metric: "peak", desig: "", county: "" };
 let FEATURES = [];
 let selectedName = null;
 
-// /private/ serves this same page behind a password and adds same-day
-// PlanetScope 3 m imagery (research licence: never on the public site).
+// The whole site is behind a password; /private/ serves this page with the
+// PlanetScope 3 m layers (research licence: never published openly).
 const PRIVATE = location.pathname.startsWith("/private");
 let PLANET = {}, PLANET_CITE = "";
 const psKey = (p, y) => `${p.code}_${y}`;
@@ -274,7 +274,7 @@ function updateYearUI() {
     $("card-year-read").appendChild(date);
     if (fire) {
       const n = document.createElement("div"); n.className = "read-flag";
-      n.textContent = "After a fire recorded by NASA FIRMS: peat exposed by fire is also exposed peat, so this year is left out of the bog's figures.";
+      n.textContent = "Within 13 months of a fire recorded by NASA FIRMS: peat exposed by fire is also exposed peat, so this year is left out of the bog's figures as a precaution.";
       $("card-year-read").appendChild(n);
     } else if (big >= BIG_PATCH_HA && p.v5_large_working) {
       const n = document.createElement("div"); n.className = "read-flag info";
@@ -299,7 +299,7 @@ function updateYearUI() {
       $("card-year-read").appendChild(date);
     }
   }
-  const ps = PLANET[psKey(p, y)];
+  const ps = PRIVATE ? swipeFrame(p, yearIdx) : null;
   if (ps) {
     const line = document.createElement("div");
     line.className = "ps-read";
@@ -310,7 +310,7 @@ function updateYearUI() {
     line.textContent = `PlanetScope 3 m: ${ps.date}` +
       (gap ? ` (${gap > 0 ? "+" : ""}${gap} d from Sentinel-2)` : " (same day)") +
       (ps.clear_pct != null ? ` · ${Math.round(ps.clear_pct)}% of the bog clear` : "") +
-      ` · ${ps.instruments.join(", ")}`;
+      ((ps.instruments || []).length ? ` · ${ps.instruments.join(", ")}` : "");
     line.classList.toggle("ps-warn", ps.clear_pct != null && ps.clear_pct < 90);
     $("card-year-read").appendChild(line);
     if (showPS && ps.candidates) {
@@ -436,15 +436,33 @@ $("lb-close").addEventListener("click", closeLightbox);
 $("lightbox").addEventListener("click", (e) => { if (e.target.id === "lightbox" || e.target.classList.contains("lb-stage")) closeLightbox(); });
 
 /* ---- PlanetScope swipe (private view only) ------------------------------ */
+// The frame the swipe shows: under v5 the frame ordered for the summer scene,
+// else an older frame only if it is within 10 days of that scene, so the
+// swipe never pairs a summer scene with a spring frame. The old spring
+// detector keeps its own frames.
+function swipeFrame(p, i) {
+  const y = cardYears(p)[i];
+  if (!isV5()) {
+    const ps = PLANET[psKey(p, y)];
+    return ps && { ...ps, src: (overlay) => `/private/planet/${psKey(p, y)}_ps${overlay ? "" : "c"}.jpg` };
+  }
+  const v = PLANET_V5[`${p.code}_${y}`];
+  if (v) return { ...v, candidates: null, instruments: v.instruments || ["PlanetScope"],
+                  src: () => `/private/planet-v5/${p.code}_${y}.jpg` };
+  const old = PLANET[psKey(p, y)], s2 = p.v5_dates[i];
+  if (!old || !s2 || Math.abs(Date.parse(old.date) - Date.parse(s2)) > 10 * 864e5) return null;
+  return { ...old, candidates: null, src: () => `/private/planet/${psKey(p, y)}_psc.jpg` };
+}
+
 function updatePS() {
-  const key = psKey(cardP, cardYears(cardP)[yearIdx]), ps = PLANET[key];
+  const ps = swipeFrame(cardP, yearIdx);
   const on = !!ps && showPS;
   const btn = $("ps-btn"), img = $("card-img-ps");
   btn.classList.toggle("hidden", !ps);
   btn.classList.toggle("ovl-on", on);
   btn.textContent = on ? "PlanetScope 3 m: on" : "PlanetScope 3 m: off";
   if (on) {
-    img.src = `/private/planet/${key}_ps${showOverlay ? "" : "c"}.jpg`;
+    img.src = ps.src(showOverlay);
     setSwipe(swipePct);
   }
   img.classList.toggle("show", on);
@@ -921,7 +939,7 @@ function renderPlanetList() {
   const evalRows = rows.filter((r) => r.ps.source !== "release");
   const bogs = new Set(rows.map((r) => r.name)).size;
   const years = rows.map((r) => r.year);
-  $("planet").innerHTML = `<h2>PlanetScope 3 m <span>· within 3 days of Sentinel-2</span></h2>
+  $("planet").innerHTML = `<h2>PlanetScope 3 m <span>· research licence</span></h2>
     <p class="ps-hint">In the bog card for ${rows.length} bog-years on ${bogs} bogs,
       ${Math.min(...years)}–${Math.max(...years)}, most of them 2024–2026. Open any bog and
       drag across the image to compare 10 m with 3 m.</p>
@@ -933,6 +951,9 @@ function renderPlanetList() {
   $("planet").classList.remove("hidden");
   $("planet").querySelectorAll(".ps-item").forEach((b) => b.addEventListener("click", () => {
     showPS = true;
+    const f = FEATURES.find((x) => x.properties.name === b.dataset.name);
+    if (isV5() && f && !(f.properties.v5_years || []).includes(Number(b.dataset.year)))
+      document.querySelector('#method button[data-v="gng"]').click();
     selectByName(b.dataset.name, true);
     const i = cardYears(cardP).indexOf(Number(b.dataset.year));
     if (i >= 0 && i !== yearIdx) showYear(i);
@@ -942,7 +963,7 @@ function renderPlanetList() {
 if (PRIVATE) {
   $("private-note").classList.remove("hidden");
   $("private-link").innerHTML =
-    `<a href="/private/findings/">Findings (RU/EN)</a> · <a href="/private/briefing/">Research briefing</a> · <a href="/">Public map</a>`;
+    `<a href="/private/findings/">Findings (RU/EN)</a> · <a href="/private/briefing/">Research briefing</a>`;
 }
 const planetPromise = PRIVATE
   ? fetch("/private/planet/manifest.json")

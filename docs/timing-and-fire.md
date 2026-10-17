@@ -20,7 +20,7 @@ Scripts: `scripts/38_time_series.py` (every clear Sentinel-2 scene of one bog),
 - PlanetScope 3 m: even milling strips on 10 August 2022; ponded water and a
   patchy surface on part of the fields on 19 June 2025.
 - Landsat 1987–2025: the fields are already present on the earliest clear
-  scene (1988). v5 does not flag them in 1987–1989 because the peat was wet on
+  scene (29 September 1987). v5 does not flag them in 1987–1989 because the peat was wet on
   those dates, so one scene a year shows dry exposed peat, not when a field
   was opened. The start of working predates the SWIR archive.
 - Scene-to-scene jumps are rain (`scripts/42_rain_check.py`, ERA5 daily
@@ -43,7 +43,7 @@ Scripts: `scripts/38_time_series.py` (every clear Sentinel-2 scene of one bog),
   from unburnt bog.
 - Cloonmoylan Bog SAC, 31 May 2020, 279 ha: two days later NBR −0.24 and
   SWIR1/SWIR2 1.11, so v5 rejects the fresh burn; regrowth within 2–4 months.
-  In April–July 2021 v5 flags 7–19% of the bog equally in burnt and unburnt
+  In April–July 2021 v5 flags 4–19% of the bog equally in burnt and unburnt
   parts: a dry spell, not the fire. The 39 ha of Cloonmoylan 2021 in the
   summer survey are therefore drought, not post-fire exposure.
 

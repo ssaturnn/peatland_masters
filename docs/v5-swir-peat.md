@@ -85,16 +85,45 @@ proposal, 8 points changed bare-peat status (7 of them earlier unsure).
 | Protected, summer | NDVI, rules, K-means, GNG | – | 0% | 0% |
 
 On the points with at least four of five votes: industrial F1 92% (87 points),
-protected 70% (160 points). Weighted (Olofsson) estimates are in
+protected 70% (160 points).
+
+These are per-point figures. The sample takes 12 points from each stratum
+(v5-detected and not), so detections are over-represented and the per-point
+recall is optimistic. Scaled to the pixel population of each site-year
+(Olofsson et al., 2014; stratified bootstrap 95% intervals):
+
+| Scope | Precision | Recall | F1 |
+|---|---:|---:|---:|
+| Industrial | 88% (77–96) | 53% (39–82) | 66% (53–85) |
+| Protected, summer | 77% (65–86) | not estimable | – |
+| External | 93% (83–100) | 54% (35–100) | 69% (50–97) |
+
+On industrial fields v5 is precise but misses about half of the exposed peat
+by area, mostly wet peat below the SWIR1 threshold. On protected bogs none of
+the 96 sampled non-detected points was bare peat, so recall cannot be
+estimated from this sample: those points stand for about 403,000 pixels, and
+the 95% upper bound on missed peat (3.8%) would allow far more missed peat
+than detected. Weighted (Olofsson) estimates are in
 `annotation/accuracy.provisional_v5_5pass.md`; the two-pass figures (industrial
 F1 89%) are in `accuracy.provisional_v5.md`. The protected recall of 100% means no
 undetected sample point was labelled bare peat; with 12 undetected points per
 site it is not a precise estimate.
 
-By site (v5 detected points labelled bare peat): Callow 9/11, Corbo 10/11,
-Barroughter 9/11, Bellanagare 4/11, Monivea 3/12, Corliskea 4/12,
+A supplementary blind sample drawn after this test (`docs/wet-peat-and-edges.md`)
+targeted dark, wet pixels that v5 leaves out. On protected bogs 5 of 40 such
+points were bare peat, freshly cut faces beside v5 detections. With that
+sample the protected recall becomes estimable: about 42% (33–59%), so v5
+finds the dry part of active cutting and misses much of its wet part. The
+same check raises industrial recall estimates slightly (62% test, 68%
+external) because it adds sample points in the undetected stratum.
+
+By site (v5 detected points labelled bare peat): Callow 10/12, Corbo 11/12,
+Barroughter 10/12, Bellanagare 4/12, Monivea 3/12, Corliskea 3/12,
 Cloonchambers 2/8. False positives are mixed pixels on cut faces and
-cut-over strips; PlanetScope was hazy at Corliskea and Cloonchambers.
+cut-over strips; PlanetScope was hazy at Corliskea and Cloonchambers. A blind
+relabel with a 30 m question found exposed peat within 30 m of 23 of the 37
+false positives; with that tolerance the protected precision is 79% per point
+and 87% (78–93%) by area (`docs/wet-peat-and-edges.md`).
 
 ### External test (`outputs/evaluation/2026-10-08-v5-external`)
 
@@ -127,7 +156,7 @@ seen depends on how the turf is spread.
 ## 6. Industrial time series
 
 v5 area on the Mountdillon areas (`outputs/positive-control/v5_series.json`)
-falls from about 1,600–1,700 ha (south, 2018–2020) to 550–1,050 ha after
+falls from about 1,600–1,700 ha (south, 2018 and spring 2020) to 550–1,250 ha in 2021–2025 after
 industrial harvesting stopped at the end of 2020, as fields are rewetted and
 colonised. The series is noisy: wet peat after rain has a lower SWIR1 and drops
 below the threshold.
@@ -138,7 +167,8 @@ below the threshold.
   survey or point-by-point expert review; agreement between passes is reported
   above.
 - v5 also flags burnt peat; FIRMS separates large fires only.
-- Wet peat can fall below the SWIR1 threshold.
+- Wet peat can fall below the SWIR1 threshold; a wet-peat extension is tested
+  in `docs/wet-peat-and-edges.md`.
 - The detection limit assumes linear mixing and a strip centred on the pixel.
 
 ## 8. Web map release (`scripts/36_v5_release.py`)

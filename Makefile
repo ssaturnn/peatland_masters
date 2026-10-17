@@ -9,7 +9,7 @@ METHODS := ndvi rules gng v4_rules v4_kmeans v4_gng
 V5TEST  := outputs/evaluation/2026-10-08-v5-test
 V5EXT   := outputs/evaluation/2026-10-08-v5-external
 
-.PHONY: all test v4 accuracy accuracy-sample accuracy-test accuracy-v5 detection-limit
+.PHONY: all test v4 accuracy accuracy-sample accuracy-test consensus accuracy-v5 detection-limit
 
 all: test v4 accuracy accuracy-v5 detection-limit
 
@@ -33,9 +33,14 @@ accuracy-test:
 		--methods $(METHODS) --tag _v4
 
 # detector v5 (SWIR peat) on its independent and external tests
+# five-pass agreement report (dry run: labels.csv already holds the consensus)
+consensus:
+	$(PY) scripts/48_multipass_consensus.py $(V5TEST) --dry-run
+	$(PY) scripts/48_multipass_consensus.py $(V5EXT) --dry-run
+
 accuracy-v5:
-	$(PY) scripts/28_accuracy_report.py $(V5TEST) --methods ndvi rules kmeans gng v5 --tag _v5
-	$(PY) scripts/28_accuracy_report.py $(V5EXT) --methods ndvi rules kmeans gng v5 --tag _v5
+	$(PY) scripts/28_accuracy_report.py $(V5TEST) --methods ndvi rules kmeans gng v5 --tag _v5_5pass
+	$(PY) scripts/28_accuracy_report.py $(V5EXT) --methods ndvi rules kmeans gng v5 --tag _v5_5pass
 
 # strip-width detection limit (offline, from frozen scenes)
 detection-limit:

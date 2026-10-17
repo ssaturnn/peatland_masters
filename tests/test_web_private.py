@@ -1,4 +1,4 @@
-"""The web server keeps licensed files (web/private/) behind Basic auth."""
+"""The web server keeps the whole site, and the licensed files in web/private/, behind Basic auth."""
 
 import base64
 import importlib.util
@@ -37,10 +37,35 @@ def client(site):
     return TestClient(server.create_app(site))
 
 
-def test_public_site_needs_no_password(client):
-    r = client.get("/")
-    assert r.status_code == 200 and "public map" in r.text
+def test_whole_site_requires_the_password(client, site):
+    (site / "app.js").write_text("map script")
     assert client.get("/healthz").json() == {"status": "ok"}
+    for url in ("/", "/index.html", "/app.js"):
+        assert client.get(url, follow_redirects=False).status_code == 401, url
+    r = client.get("/app.js", headers=AUTH)
+    assert r.status_code == 200 and r.text == "map script"
+    assert r.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_root_and_old_page_redirect_to_the_private_map_after_login(client):
+    for url in ("/", "/index.html"):
+        r = client.get(url, headers=AUTH, follow_redirects=False)
+        assert r.status_code == 307 and r.headers["location"] == "/private/", url
+
+
+def test_only_map_assets_are_served_from_the_web_folder(client, site):
+    (site / "data").mkdir()
+    (site / "data" / "sites.geojson").write_text("{}")
+    (site / "server.py").write_text("code")
+    (site / "Procfile").write_text("web: x")
+    assert client.get("/data/sites.geojson", headers=AUTH).status_code == 200
+    for url in ("/server.py", "/Procfile", "/docs", "/openapi.json"):
+        assert client.get(url, headers=AUTH).status_code == 404, url
+
+
+def test_head_requests_work(client):
+    assert client.head("/healthz").status_code == 200
+    assert client.head("/private/", headers=AUTH).status_code == 200
 
 
 def test_private_area_requires_the_configured_credentials(client):

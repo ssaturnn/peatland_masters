@@ -2,7 +2,7 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": { "builder": "NIXPACKS" },
   "deploy": {
-    "startCommand": "uvicorn server:app --host 0.0.0.0 --port $PORT",
+    "startCommand": "uvicorn server:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips=*",
     "healthcheckPath": "/healthz",
     "restartPolicyType": "ON_FAILURE"
   }

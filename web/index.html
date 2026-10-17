@@ -11,7 +11,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230c211a'/%3E%3Ccircle cx='16' cy='16' r='8.5' fill='%23ff7a5c'/%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%234bd8a0' stroke-width='2.2'/%3E%3C/svg%3E" />
   <link rel="stylesheet"
         href="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.css" />
-  <link rel="stylesheet" href="style.css?v=5.6" />
+  <link rel="stylesheet" href="style.css?v=5.8" />
 </head>
 <body>
   <aside id="sidebar">
@@ -19,8 +19,8 @@
       <h1>Peatland turf-cutting monitor</h1>
       <p class="sub">Protected bogs · Galway · Mayo · Roscommon ·
         Sentinel-2 <span id="coverage"></span></p>
-      <p id="private-note" class="sub priv-note hidden">Private view · same-day
-        PlanetScope 3 m imagery (research licence)</p>
+      <p id="private-note" class="sub priv-note hidden">Password-protected · PlanetScope 3 m
+        imagery (research licence)</p>
     </header>
 
     <section class="help">
@@ -104,7 +104,7 @@
     <footer>
       <div id="legend"></div>
       <p><a href="data/sites.geojson" download="peatland-results.geojson">Download mapped results (GeoJSON)</a></p>
-      <p id="private-link"><a href="/private/">PlanetScope 3 m view (password)</a></p>
+      <p id="private-link"></p>
       <p class="disclaimer">v5 maps exposed peat on the clearest Sentinel-2 scene between
         15 June and 31 August of each year (rule: SWIR2 above NIR, bright SWIR1, a SWIR ratio
         that separates fresh burns, and no water). It sees strips of exposed peat about 6 m
@@ -133,7 +133,7 @@
         <div class="img-stack">
           <img id="card-img-a" class="tile show" alt="Detected bare peat" draggable="false" />
           <img id="card-img-b" class="tile" alt="" draggable="false" />
-          <img id="card-img-ps" class="tile" alt="Same-day PlanetScope 3 m image" draggable="false" />
+          <img id="card-img-ps" class="tile" alt="PlanetScope 3 m image" draggable="false" />
           <div id="swipe" class="swipe hidden" role="slider" tabindex="0"
                aria-label="Compare Sentinel-2 10 m with PlanetScope 3 m"
                aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
@@ -144,7 +144,7 @@
         <div id="card-noimg" class="card-noimg hidden">Image unavailable for this year</div>
         <div class="card-legend" id="card-legend"></div>
         <button id="ovl-btn" class="ovl-on" title="Toggle detection overlays">Overlays: on</button>
-        <button id="ps-btn" class="hidden" title="Compare with same-day PlanetScope 3 m imagery">PlanetScope 3 m</button>
+        <button id="ps-btn" class="hidden" title="Compare with PlanetScope 3 m imagery">PlanetScope 3 m</button>
         <div class="year-pill" id="year-pill"></div>
       </div>
 
@@ -180,6 +180,6 @@
   </div>
 
   <script src="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.js"></script>
-  <script src="app.js?v=5.6"></script>
+  <script src="app.js?v=5.8"></script>
 </body>
 </html>

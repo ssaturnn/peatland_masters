@@ -166,7 +166,7 @@ def false_positives():
             "precision_bare_vs_vegetated": round(by_truth["bare_peat"] / scored, 3) if scored else None,
             "false_positives_vegetated": len(fps), "false_positive_note_classes": dict(classes),
             "examples": examples,
-            "labels_note": "reference labels are model pre-labels from two blind passes, pending the author's review"}
+            "labels_note": "reference labels are the majority of five blind model-assisted passes"}
 
 
 def main():

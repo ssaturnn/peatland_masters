@@ -1,24 +1,20 @@
 # Web map — peatland turf-cutting monitor
 
 Interactive MapLibre map of protected bogs in Galway / Mayo / Roscommon,
-showing detected bare-peat area and how much has been newly cut between
-two survey years. Reads `data/sites.geojson`, produced by
-`scripts/09_export_web.py`.
+showing exposed peat mapped by detector v5 (Sentinel-2 SWIR, one clear summer
+scene per year, 2018–2026), with PlanetScope 3 m imagery for comparison. Reads
+`data/sites.geojson` and the card tiles in `data/tiles-v5/`, produced by
+`scripts/36_v5_release.py` and `scripts/46_compare_tiles.py`.
+
+The whole site is behind HTTP Basic auth (see below); only `/healthz` is open.
 
 ## Run locally
 
 ```bash
 cd web
 pip install -r requirements.txt
-uvicorn server:app --reload --port 8000
-# open http://localhost:8000
-```
-
-Or, with no dependencies at all (static only):
-
-```bash
-cd web
-python3 -m http.server 8000
+PRIVATE_USER=me PRIVATE_PASSWORD=local uvicorn server:app --reload --port 8000
+# open http://localhost:8000 and log in with those values
 ```
 
 ## Deploy on Railway
@@ -28,25 +24,27 @@ python3 -m http.server 8000
 3. In the service **Settings → Root Directory**, set `web`.
    (So Railway uses `web/requirements.txt`, `web/Procfile`, `web/railway.json`.)
 4. Railway builds with Nixpacks and starts
-   `uvicorn server:app --host 0.0.0.0 --port $PORT`.
+   `uvicorn server:app --host 0.0.0.0 --port $PORT --proxy-headers ...`.
 5. Open the generated URL. Health check is at `/healthz`.
 
-## Private area (licensed imagery)
+## Password and licensed imagery
 
-`web/private/` holds material that must not be public, such as figures
-with PlanetScope imagery (Planet's Education & Research licence covers
-non-commercial research only). The folder is gitignored and served only
-at `/private/`, behind HTTP Basic auth. Credentials live in the Railway
-environment, never in the repo:
+Every path except `/healthz` needs the Basic-auth credentials; `/` and
+`/index.html` redirect to `/private/`. From `web/` itself only `index.html`,
+`app.js`, `style.css` and `data/` are served. `web/private/` holds material
+that must not be public, such as figures with PlanetScope imagery (Planet's
+Education & Research licence covers non-commercial research only); it is
+gitignored. Credentials live in the Railway environment, never in the repo:
 
 ```bash
 railway variables --set PRIVATE_USER=... --set PRIVATE_PASSWORD=... --skip-deploys
 cd web && railway up --no-gitignore
 ```
 
-`/private/` itself is the same map: in the bog card, evaluation site-years
-with a same-day PlanetScope scene get a swipe between Sentinel-2 10 m and
-PlanetScope 3 m. `/private/briefing/` is the supervisor briefing.
+`/private/` is the map with PlanetScope layers: the bog card has a swipe
+between Sentinel-2 10 m and PlanetScope 3 m when a frame lies within 10 days of
+the summer scene, and the "Compare this summer" panel. `/private/findings/` and
+`/private/briefing/` are the results pages.
 
 The evaluation site-years come from `python3 scripts/22_planet_web_tiles.py`.
 The other bogs (latest year, plus the NPWS-documented years) are ordered
@@ -72,10 +70,10 @@ area stays closed.
 
 ## Refresh the data
 
-Re-run the export and redeploy (or commit the new file):
-
 ```bash
-python3 scripts/09_export_web.py   # rewrites web/data/sites.geojson
+python3 scripts/36_v5_release.py          # build v5 card tiles (resumable)
+python3 scripts/36_v5_release.py --write  # merge into sites.geojson
+python3 scripts/46_compare_tiles.py swir  # SWIR false-colour tiles
 ```
 
 ## Files
@@ -83,8 +81,9 @@ python3 scripts/09_export_web.py   # rewrites web/data/sites.geojson
 | File | Purpose |
 |---|---|
 | `index.html` | Page shell, sidebar, legend |
-| `app.js` | MapLibre map, loads GeoJSON, colours sites by newly-cut area |
+| `app.js` | MapLibre map, bog cards, compare panel, PlanetScope swipe |
 | `style.css` | Styling |
 | `server.py` | FastAPI static server (Railway) |
 | `data/sites.geojson` | Per-site results (generated) |
+| `data/tiles-v5/` | Card tiles: v5 mask, natural colour (`c`), SWIR (`s`) |
 | `private/` | Licensed material behind a password (gitignored) |

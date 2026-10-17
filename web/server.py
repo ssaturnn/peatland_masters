@@ -4,12 +4,13 @@ Serves index.html, app.js, style.css and data/sites.geojson. Railway
 sets $PORT; locally it defaults to 8000. Point Railway's service "root
 directory" at web/ so this folder's requirements.txt / Procfile are used.
 
-/private/ is the same map with same-day PlanetScope 3 m imagery, and
-web/private/ holds that licensed material (PlanetScope is for
-non-commercial research only). Everything under /private/ sits behind
-HTTP Basic auth (PRIVATE_USER / PRIVATE_PASSWORD in the Railway
-environment); the folder is gitignored and never served by the public
-mount. Deploy with `railway up --no-gitignore` so the folder is uploaded.
+The whole site sits behind HTTP Basic auth (PRIVATE_USER /
+PRIVATE_PASSWORD in the Railway environment); only /healthz is open, for
+the platform health check. "/" redirects to /private/, the map with
+same-day PlanetScope 3 m imagery. web/private/ holds that licensed
+material (PlanetScope is for non-commercial research only); the folder is
+gitignored and never served by the root mount. Deploy with
+`railway up --no-gitignore` so the folder is uploaded.
 """
 
 import base64
@@ -31,8 +32,14 @@ def _inside(path: str, directory: str) -> bool:
     return os.path.commonpath([path, directory]) == directory
 
 
+# the only files served from web/ itself: the map page, its script and styles,
+# and the data folder (never server code, config or the private folder)
+SITE_FILES = {"index.html", "app.js", "style.css"}
+SITE_DIRS = {"data"}
+
+
 class PublicFiles(StaticFiles):
-    """The public site: every file in web/ except the private folder."""
+    """Map assets in web/: the page, script, styles and data/, nothing else."""
 
     def __init__(self, *, private_dir: str, **kwargs):
         super().__init__(**kwargs)
@@ -40,7 +47,11 @@ class PublicFiles(StaticFiles):
 
     def lookup_path(self, path):
         full_path, stat_result = super().lookup_path(path)
-        if full_path and _inside(full_path, self.private_dir):
+        if not full_path or _inside(full_path, self.private_dir):
+            return "", None
+        rel = os.path.relpath(os.path.realpath(full_path), os.path.realpath(self.directory))
+        parts = rel.split(os.sep)
+        if not (rel in SITE_FILES or (len(parts) > 1 and parts[0] in SITE_DIRS)):
             return "", None
         return full_path, stat_result
 
@@ -62,17 +73,28 @@ def authorised(header: str | None) -> bool:
 
 def create_app(web: Path = WEB) -> FastAPI:
     private_dir = os.path.realpath(web / "private")
-    app = FastAPI(title="Peatland turf-cutting monitor")
+    app = FastAPI(title="Peatland turf-cutting monitor",
+                  docs_url=None, redoc_url=None, openapi_url=None)
+    get = lambda path: app.api_route(path, methods=["GET", "HEAD"], include_in_schema=False)
 
-    @app.get("/healthz")
+    @get("/healthz")
     def healthz():
         return {"status": "ok"}
 
-    @app.get(PRIVATE_PREFIX, include_in_schema=False)
+    # the map lives at /private/; the old public addresses lead there
+    @get("/")
+    def root():
+        return RedirectResponse(PRIVATE_PREFIX + "/")
+
+    @get("/index.html")
+    def index_page():
+        return RedirectResponse(PRIVATE_PREFIX + "/")
+
+    @get(PRIVATE_PREFIX)
     def private_root():
         return RedirectResponse(PRIVATE_PREFIX + "/")
 
-    @app.get(PRIVATE_PREFIX + "/", include_in_schema=False)
+    @get(PRIVATE_PREFIX + "/")
     def private_map():
         # the public page, re-based so its relative asset URLs resolve to /;
         # app.js adds the PlanetScope layer when served under /private/
@@ -80,26 +102,26 @@ def create_app(web: Path = WEB) -> FastAPI:
         return HTMLResponse(page.replace("<head>", '<head>\n  <base href="/" />', 1))
 
     @app.middleware("http")
-    async def private_area(request: Request, call_next):
+    async def password_wall(request: Request, call_next):
         path = request.scope["path"]
-        if not path.startswith(PRIVATE_PREFIX):
-            response = await call_next(request)
-            # the page, script and styles change together on every release:
-            # make browsers revalidate them so a cached page never meets a new script
-            if path == "/" or path.endswith((".html", ".js", ".css", ".geojson")):
-                response.headers["Cache-Control"] = "no-cache"
-            return response
+        if path == "/healthz":
+            return await call_next(request)
         if not authorised(request.headers.get("authorization")):
             return Response(status_code=401, headers={
                 "WWW-Authenticate": 'Basic realm="Peatland private", charset="UTF-8"'})
         response = await call_next(request)
-        response.headers["Cache-Control"] = "private, no-store"
+        if path.startswith(PRIVATE_PREFIX):
+            response.headers["Cache-Control"] = "private, no-store"
+        elif path.endswith((".html", ".js", ".css", ".geojson")):
+            # the page, script and styles change together on every release:
+            # make browsers revalidate them so a cached page never meets a new script
+            response.headers["Cache-Control"] = "private, no-cache"
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
         return response
 
     app.mount(PRIVATE_PREFIX, StaticFiles(directory=private_dir, html=True, check_dir=False),
               name="private")
-    # everything else is static; html=True serves index.html at /
+    # map assets (script, styles, Sentinel-2 tiles), also behind the password
     app.mount("/", PublicFiles(directory=web, html=True, private_dir=private_dir), name="static")
     return app
 

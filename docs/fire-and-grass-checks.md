@@ -53,7 +53,7 @@ each scene (`scripts/42_rain_check.py`):
   dark (< 20%) earlier in the same season. Median rain in the 3 days before:
   16 mm, against 0.8 mm on exposed scenes; 15 of the 18 follow at least 5 mm.
 - 7 of the 18 come back to ≥ 60% later in the same season, median 10 days
-  later (5 days at the quickest). The others fall in late August–September
+  later (3 days at the quickest). The others fall in late August–September
   with no later clear summer scene, and the fields are exposed again the next
   spring.
 - SWIR1/SWIR2 of the field pixels on dry scenes (≥ 50% exposed): median 1.46,
@@ -71,8 +71,8 @@ checked. For each bog-year of the v5 release with at least 0.1 ha of exposed
 peat (233 bog-years, 60 bogs), any vegetation-fire detection of any confidence
 within 1 km of the boundary, two years either side:
 
-- 185 of 233 bog-years have no FIRMS detection at all (770 of 942 ha); 48 have
-  one (172 ha). Of the 167 bog-years up to 2024, 122 are silent.
+- 185 of 233 bog-years have no FIRMS detection at all (770 of 943 ha); 48 have
+  at least one (172 ha). Of the 167 bog-years up to 2024, 122 are silent.
 - Only 20 bog-years (111 ha) have a detection in the same or the previous
   year. Nine are already flagged after-fire in the release and left out of
   its figures (Doogort 2019, Cloonmoylan 2020–2021, Tullaghan (Roscommon)
@@ -90,7 +90,7 @@ is why checks 1 and 2 matter: they test the exposed surface itself.
 ## 4. Cut peat or dry grass
 
 The old spring NDVI detector's candidates that are green by summer (median
-summer NDVI ≥ 0.5) are winter-dead Molinia and sedge: 17,568 pixels on 8
+summer NDVI ≥ 0.5) are winter-dead Molinia and sedge: 17,568 pixels on 10
 April–May site-years. On the same spring scenes v5 flags **7 of them
 (0.04%)**. Almost all fail NBR < 0 (17,541 pixels); the SWIR1 and ratio tests
 fail only 171 and 12.
@@ -105,13 +105,12 @@ fail only 171 and 12.
 Dry grass is brighter than peat in near infrared and keeps NBR positive; peat
 has SWIR2 above NIR. NBR is what separates them, not NDVI.
 
-In the labelled v5 test (272 points; reference labels are model pre-labels
-from two blind passes, pending review), v5 flags 128 points: 80 bare peat,
-40 vegetated, 7 unsure, 1 other. By the annotator notes the 40 vegetated
-ones are 29 mixed pixels at a cut face or strip edge, 5 revegetating cutaway,
-4 tracks, 2 other vegetation; **none mentions dry or dead grass**. (The raw
-point precision here, 67%, is unweighted over both scopes; the stratified
-figures in `docs/v5-swir-peat.md` stand.)
+In the labelled v5 test (272 points; reference labels are the majority of
+five blind passes), v5 flags 128 points: 85 bare peat, 42 vegetated, 1 other.
+By the annotator notes the 42 vegetated ones are 28 mixed pixels at a cut face
+or strip edge, 7 tracks, 5 revegetating cutaway, 2 other; **none is called dry
+grass by the majority**. (The raw point precision here, 67%, is unweighted over
+both scopes; the stratified figures in `docs/v5-swir-peat.md` stand.)
 
 ## Conclusion
 

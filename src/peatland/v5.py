@@ -51,3 +51,41 @@ def peat_mask(stack, valid, inside, order=BANDS, swir1_min=SWIR1_MIN,
         signature = ((ix["nbr"] < 0) & (ix["swir1"] >= swir1_min)
                      & (ix["ratio"] >= ratio_min) & (ix["mndwi"] <= mndwi_max))
     return np.asarray(valid, bool) & np.asarray(inside, bool) & np.nan_to_num(signature).astype(bool)
+
+
+# Extension tested after the v5 freeze (scripts/49_wet_peat.py, docs/wet-peat-and-edges.md).
+# Wet or freshly cut peat is dark in every band: SWIR1 falls below 0.22 and NBR
+# turns positive, so peat_mask misses it. It still has low NIR and no green-up,
+# unlike vegetation (NIR above 0.3, NBR above 0.4). Thresholds were read off the
+# five peat pixels v5 missed in the industrial test sample, then checked on a
+# new blind sample. On intact bog the same signature also fits wet hollows, so
+# there it is only kept next to a dry-peat detection.
+WET_NIR_MAX = 0.20
+WET_NBR_MAX = 0.30
+WET_NDVI_MAX = 0.60
+WET_SWIR1_MIN = 0.14
+WET_NEAR_PX = 3
+
+
+def wet_peat_mask(stack, valid, inside, order=BANDS):
+    """Dark wet-peat candidates that peat_mask leaves out."""
+    b = {name: np.asarray(stack[..., order.index(name)], float) / 10000.0
+         for name in ("green", "red", "nir", "swir1", "swir2")}
+    with np.errstate(invalid="ignore", divide="ignore"):
+        signature = ((b["nir"] < WET_NIR_MAX)
+                     & ((b["nir"] - b["swir2"]) / (b["nir"] + b["swir2"]) < WET_NBR_MAX)
+                     & ((b["nir"] - b["red"]) / (b["nir"] + b["red"]) < WET_NDVI_MAX)
+                     & ((b["green"] - b["swir1"]) / (b["green"] + b["swir1"]) <= MNDWI_MAX)
+                     & (b["swir1"] >= WET_SWIR1_MIN))
+    dry = peat_mask(stack, valid, inside, order)
+    return (np.asarray(valid, bool) & np.asarray(inside, bool)
+            & np.nan_to_num(signature).astype(bool) & ~dry)
+
+
+def near(mask, px=WET_NEAR_PX):
+    """Pixels within `px` pixels (Euclidean) of any pixel of `mask`."""
+    from scipy import ndimage
+    mask = np.asarray(mask, bool)
+    if not mask.any():
+        return np.zeros_like(mask)
+    return ndimage.distance_transform_edt(~mask) <= px
